@@ -6,7 +6,8 @@ $installer = Join-Path $project 'install.ps1'
 $fixtureExe = Join-Path $project 'bin\CodexQuotaPills.exe'
 if (-not (Test-Path -LiteralPath $fixtureExe)) { throw 'Run build.ps1 before installation tests.' }
 $fixtureVersion = (Get-Item -LiteralPath $fixtureExe).VersionInfo.FileVersion -replace '\.0$',''
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('Quota 安装测试 ' + [guid]::NewGuid().ToString('N'))
+$unicodeName = [string][char]0x4E2D + [char]0x6587
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('Quota InstallTests ' + $unicodeName + ' ' + [guid]::NewGuid().ToString('N'))
 $testRoot = Assert-InstallPath $testRoot
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $passed = 0
@@ -128,17 +129,19 @@ try {
     Check ((Initialize-InstallLedger $testLedger) -eq 'unchanged') 'Existing continuation ledger reinitialized.'
     Check ((Get-FileHash -LiteralPath $testLedger).Hash -eq $ledgerHash) 'Existing continuation preferences or records changed.'
     $shortcutPath = Join-Path $testRoot 'Quota.lnk'
-    Save-InstallShortcut $shortcutPath $fixtureExe
-    Save-InstallShortcut $shortcutPath $fixtureExe
+    $unicodeTarget = Join-Path $packageFolder 'CodexQuotaPills.exe'
+    Save-InstallShortcut $shortcutPath $unicodeTarget
+    Save-InstallShortcut $shortcutPath $unicodeTarget
     Check (@(Get-ChildItem -LiteralPath $testRoot -Filter '*.bak').Count -eq 0) 'Repeated shortcut created unnecessary backups.'
-    $shortcutShell = New-Object -ComObject WScript.Shell
-    Check ($shortcutShell.CreateShortcut($shortcutPath).TargetPath -eq $fixtureExe) 'Shortcut target incorrect.'
+    $savedShortcut = Get-InstallShortcut $shortcutPath
+    Check ($savedShortcut.TargetPath -eq $unicodeTarget) 'Unicode shortcut target incorrect.'
+    Check ($savedShortcut.WorkingDirectory -eq $packageFolder -and -not $savedShortcut.Arguments) 'Unicode shortcut working directory or arguments changed.'
     Write-Output "Installation tests passed: $passed"
 } finally {
     # Only delete the newly-created, resolved task directory below system Temp.
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     $cleanupPath = Assert-InstallPath $testRoot
     if (-not $cleanupPath.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase) -or
-        (Split-Path -Leaf $cleanupPath) -notlike 'Quota 安装测试 *') { throw 'Refusing test cleanup outside task Temp.' }
+        (Split-Path -Leaf $cleanupPath) -notlike 'Quota InstallTests *') { throw 'Refusing test cleanup outside task Temp.' }
     Remove-Item -LiteralPath $cleanupPath -Recurse -Force
 }

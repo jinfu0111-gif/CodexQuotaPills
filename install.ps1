@@ -150,21 +150,86 @@ function Get-InstallDiagnostics([string]$Exe) {
     } finally { $process.Dispose() }
 }
 
+function Initialize-InstallShortcuts {
+    if ('QuotaInstall.Shortcuts' -as [type]) { return }
+    # IShellLinkW and IPersistFile use Unicode even on an English Windows host.
+    # WScript.Shell's shortcut persistence can convert paths via the ANSI locale.
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+namespace QuotaInstall {
+ [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+ internal class ShellLink {}
+ [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+ internal interface IShellLinkW {
+  void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int length, IntPtr data, uint flags);
+  void GetIDList(out IntPtr id);
+  void SetIDList(IntPtr id);
+  void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int length);
+  void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string text);
+  void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int length);
+  void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string path);
+  void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int length);
+  void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string text);
+  void GetHotkey(out short key);
+  void SetHotkey(short key);
+  void GetShowCmd(out int command);
+  void SetShowCmd(int command);
+  void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int length, out int index);
+  void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+  void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+  void Resolve(IntPtr window, uint flags);
+  void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+ }
+ public static class Shortcuts {
+  public static string[] Read(string file) {
+   object instance = new ShellLink();
+   try {
+    ((IPersistFile)instance).Load(file, 0);
+    IShellLinkW link = (IShellLinkW)instance;
+    StringBuilder target = new StringBuilder(32768), args = new StringBuilder(32768), working = new StringBuilder(32768);
+    link.GetPath(target, target.Capacity, IntPtr.Zero, 4);
+    link.GetArguments(args, args.Capacity);
+    link.GetWorkingDirectory(working, working.Capacity);
+    return new string[] { target.ToString(), args.ToString(), working.ToString() };
+   } finally { Marshal.FinalReleaseComObject(instance); }
+  }
+  public static void Save(string file, string target) {
+   object instance = new ShellLink();
+   try {
+    IShellLinkW link = (IShellLinkW)instance;
+    link.SetPath(target);
+    link.SetArguments("");
+    link.SetWorkingDirectory(Path.GetDirectoryName(target));
+    ((IPersistFile)instance).Save(file, true);
+   } finally { Marshal.FinalReleaseComObject(instance); }
+  }
+ }
+}
+'@
+}
+
+function Get-InstallShortcut([string]$Path) {
+    $null = Assert-InstallPath $Path
+    Initialize-InstallShortcuts
+    $fields = [QuotaInstall.Shortcuts]::Read($Path)
+    return [pscustomobject]@{ TargetPath=$fields[0]; Arguments=$fields[1]; WorkingDirectory=$fields[2] }
+}
+
 function Save-InstallShortcut([string]$Path, [string]$Exe) {
     $null = Assert-InstallPath $Path
-    $shell = New-Object -ComObject WScript.Shell
+    Initialize-InstallShortcuts
     if (Test-Path -LiteralPath $Path) {
-        $old = $shell.CreateShortcut($Path)
+        $old = Get-InstallShortcut $Path
         if ([IO.Path]::GetFileName($old.TargetPath) -ine 'CodexQuotaPills.exe') { throw 'Shortcut name is already used by another program.' }
         if ($old.TargetPath -eq $Exe -and -not $old.Arguments) { return }
         Copy-Item -LiteralPath $Path -Destination ($Path + '.' + [guid]::NewGuid().ToString('N') + '.bak')
     }
     New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
-    $shortcut = $shell.CreateShortcut($Path)
-    $shortcut.TargetPath = $Exe
-    $shortcut.Arguments = ''
-    $shortcut.WorkingDirectory = Split-Path -Parent $Exe
-    $shortcut.Save()
+    [QuotaInstall.Shortcuts]::Save($Path, $Exe)
 }
 
 function Initialize-InstallLedger([string]$Path) {
@@ -219,9 +284,8 @@ $exeHash = (Get-FileHash -LiteralPath $stagedExe -Algorithm SHA256).Hash
 $candidates = @()
 $startupLinks = @()
 if (-not $isolatedRoot) {
-    $shell = New-Object -ComObject WScript.Shell
     foreach ($link in (Get-ChildItem -LiteralPath ([Environment]::GetFolderPath('Startup')) -Filter '*.lnk')) {
-        $shortcut = $shell.CreateShortcut($link.FullName)
+        $shortcut = Get-InstallShortcut $link.FullName
         if ([IO.Path]::GetFileName($shortcut.TargetPath) -ieq 'CodexQuotaPills.exe') {
             $startupLinks += $link.FullName
             $candidates += $shortcut.TargetPath
@@ -230,7 +294,7 @@ if (-not $isolatedRoot) {
     $candidates += Join-Path $InstallRoot 'CodexQuotaPills.exe'
     $menuLink = Join-Path ([Environment]::GetFolderPath('Programs')) 'Codex Quota Pills.lnk'
     if (Test-Path -LiteralPath $menuLink) {
-        $menuTarget = $shell.CreateShortcut($menuLink).TargetPath
+        $menuTarget = (Get-InstallShortcut $menuLink).TargetPath
         if ([IO.Path]::GetFileName($menuTarget) -ieq 'CodexQuotaPills.exe') { $candidates += $menuTarget }
     }
     foreach ($instance in @(Get-Process -Name CodexQuotaPills -ErrorAction SilentlyContinue)) {
