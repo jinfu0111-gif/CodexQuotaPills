@@ -1,0 +1,28 @@
+# Local build tools and outputs
+.tools/
+bin/
+tests/bin/
+
+# Local runtime data
+/usage-cache.ini
+**/settings.ini
+**/snapshot.txt
+**/reset-radar-cache.json
+**/reset-radar-state.ini
+**/reset-radar-snapshot.txt
+**/AutoResume/ledger.json*
+**/auto-resume-readonly-check.txt
+
+# Research-only materials
+/report-assets/
+/开源Codex用量工具调研报告.md
+
+# Distributable assets are uploaded to GitHub Releases, never committed
+/dist/
+
+# Windows and editor files
+Thumbs.db
+.DS_Store
+.vs/
+*.user
+*.suo

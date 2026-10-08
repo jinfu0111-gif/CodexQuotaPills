@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        shell: pwsh
+        run: .\test.ps1
+
+      - name: Build executable
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexQuotaPills-windows
+          path: |
+            bin/CodexQuotaPills.exe
+            LICENSE
+            NOTICE.md
+            THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+
