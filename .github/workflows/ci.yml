@@ -24,6 +24,10 @@ jobs:
         shell: pwsh
         run: .\build.ps1
 
+      - name: Verify installation boundaries and repeat installs
+        shell: pwsh
+        run: .\tests\InstallTests.ps1
+
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
@@ -34,4 +38,3 @@ jobs:
             NOTICE.md
             THIRD_PARTY_NOTICES.md
           if-no-files-found: error
-

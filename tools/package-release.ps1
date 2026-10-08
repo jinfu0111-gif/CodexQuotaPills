@@ -6,7 +6,7 @@ $taskExe = Join-Path $taskRoot 'bin\CodexQuotaPills.exe'
 if ((Get-Item -LiteralPath $taskExe).VersionInfo.FileVersion -ne "$Version.0") { throw 'Executable version does not match release.' }
 $taskPortable = Join-Path $taskDist "CodexQuotaPills-$Version-portable"
 $taskSource = Join-Path $taskDist "CodexQuotaPills-$Version-source"
-$taskPublicDocs = @('README.md','CHANGELOG.md','LICENSE','NOTICE.md','THIRD_PARTY_NOTICES.md','SECURITY.md','FALSE_POSITIVE_GUIDE.md')
+$taskPublicDocs = @('README.md','INSTALL.md','CHANGELOG.md','LICENSE','NOTICE.md','THIRD_PARTY_NOTICES.md','SECURITY.md','FALSE_POSITIVE_GUIDE.md')
 # Explicit current product documents and illustrations, never the whole docs tree.
 $taskProductDocs = @(
     'docs\desktop-ipc-compatibility.md',
@@ -28,7 +28,7 @@ $taskProductDocs = @(
     'docs\images\reset-radar-banner-close-preview@2x.png'
 )
 $taskInstallerAssets = @('app-icon.ico','app-icon.png','usage-cache.ini')
-foreach ($taskRequired in @($taskPublicDocs + $taskProductDocs + @($taskInstallerAssets | ForEach-Object { 'installer-assets\' + $_ }))) {
+foreach ($taskRequired in @($taskPublicDocs + $taskProductDocs + @('install.ps1','install-release.json','installer-assets\AGENTS.public.md') + @($taskInstallerAssets | ForEach-Object { 'installer-assets\' + $_ }))) {
     if (-not (Test-Path -LiteralPath (Join-Path $taskRoot $taskRequired) -PathType Leaf)) { throw "Missing public package input: $taskRequired" }
 }
 foreach ($taskPath in @($taskPortable, $taskSource, "$taskPortable.zip", "$taskSource.zip", (Join-Path $taskDist "SHA256SUMS-$Version.txt"))) {
@@ -42,10 +42,11 @@ foreach ($taskName in $taskPublicDocs) {
 Copy-Item -LiteralPath $taskExe -Destination $taskPortable
 Copy-Item -LiteralPath (Join-Path $taskRoot 'installer-assets\usage-cache.ini') -Destination $taskPortable
 foreach ($taskItem in (Get-ChildItem -LiteralPath $taskRoot -File)) {
-    if ($taskItem.Extension -in @('.cs','.ps1','.iss','.manifest') -or $taskItem.Name -in @('.gitignore','CONTRIBUTING.md','AGENT_INSTALL_PROMPT.md')) {
+    if ($taskItem.Extension -in @('.cs','.ps1','.iss','.manifest') -or $taskItem.Name -in @('.gitignore','CONTRIBUTING.md','AGENT_INSTALL_PROMPT.md','install-release.json')) {
         Copy-Item -LiteralPath $taskItem.FullName -Destination $taskSource
     }
 }
+Copy-Item -LiteralPath (Join-Path $taskRoot 'installer-assets\AGENTS.public.md') -Destination (Join-Path $taskSource 'AGENTS.md')
 # Public source only; assets and docs have their own explicit lists below.
 foreach ($taskFolder in @('tests','tools','MsixUpdater','.github')) {
     $taskFolderPath = Join-Path $taskRoot $taskFolder
