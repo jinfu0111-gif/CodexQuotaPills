@@ -8,6 +8,29 @@ internal static class ResetRadarTests
 
     private static int Main(string[] args)
     {
+        const string cursorAssemblyPrefix = "--cursor-message-assembly=";
+        if (args.Length == 1 && args[0].StartsWith(cursorAssemblyPrefix, StringComparison.Ordinal))
+        {
+            System.Reflection.Assembly assembly = System.Reflection.Assembly.LoadFrom(args[0].Substring(cursorAssemblyPrefix.Length));
+            Run("main overlay cursor messages cannot re-enter Control.Cursor", delegate {
+                CursorMessageTests.DoesNotReenterControlCursor(assembly, "CodexUsageOverlay.OverlayForm");
+            });
+            Run("placement menu cursor messages cannot re-enter Control.Cursor", delegate {
+                CursorMessageTests.DoesNotReenterControlCursor(assembly, "CodexUsageOverlay.PlacementSelectorForm");
+            });
+            return failures == 0 ? 0 : 1;
+        }
+        if (args.Length == 1 && args[0] == "--isolated-native-ipc-fixture")
+        {
+            Run("isolated native pipe fixture", AutoResumeTests.IsolatedDispatchUsesOriginalOwnerAndCancel);
+            return failures == 0 ? 0 : 1;
+        }
+        if (args.Length == 1 && args[0] == "--live-session-metrics-only") return SessionUsageTests.LiveReadOnly();
+        Run("account zero requires same-account separated confirmation", SessionUsageTests.AccountZeroNeedsConfirmation);
+        Run("internal subagent records do not consume user selection slots", SessionUsageTests.InternalTasksDoNotFillSelectionSlots);
+        Run("compact update capsule and pointer feedback are consistent", PlacementMenuLayoutTests.HeaderSizeAndCursorFeedbackAreConsistent);
+        Run("cache ratio context and compaction remain distinct", SessionUsageTests.CacheAndContextAreDifferent);
+        Run("SQLite metadata is read-only schema-bound and session-bound", SessionUsageTests.SqliteIsReadOnlyAndSessionBound);
         if (args.Length == 1 && args[0] == "--live-auto-resume-readonly")
             return AutoResumeTests.LiveReadOnly();
         if (args.Length == 1 && args[0] == "--live-auto-resume-scan-readonly")
@@ -19,7 +42,7 @@ internal static class ResetRadarTests
         Run("auto-resume intent survives restart and cancel", AutoResumeTests.IntentSurvivesRestartAndCancellation);
         Run("future app versions require compatible verified contract", AutoResumeTests.FutureVersionsRequireVerifiedContract);
         Run("desktop contract archive bounds are validated", AutoResumeTests.ArchiveBoundsAreValidated);
-        Run("auto-resume isolated IPC dispatch preserves owner and cancel", AutoResumeTests.IsolatedDispatchUsesOriginalOwnerAndCancel);
+        Run("auto-resume isolated IPC dispatch preserves owner and cancel", RunNativePipeFixtureInOwnProcess);
         Run("auto-resume defaults migrate once and preserve pause", AutoResumeTests.AutomaticDefaultsMigrateOnceAndPreservePause);
         Run("background scan and early recovery need no clicks", AutoResumeTests.BackgroundScanAndEarlyRecoveryNeedNoClicks);
         if (args.Length == 1 &&
@@ -78,10 +101,13 @@ internal static class ResetRadarTests
         Run("composer pills clamp invalid percentages", ComposerUsagePillsTests.PercentagesAreClamped);
         Run("quota hover shows reset times", ComposerUsagePillsTests.QuotaHoverShowsResetTimes);
         Run("combined hover card preserves credits and live Tibo", ComposerUsagePillsTests.PlanHoverPrefersCreditsThenTibo);
-        Run("PLUS click target has forgiving edges", ComposerUsagePillsTests.PlanClickTargetHasForgivingEdges);
+        Run("5h click target has forgiving edges", ComposerUsagePillsTests.PlanClickTargetHasForgivingEdges);
+        Run("5h menu survives loading hidden plan and narrow widths", ComposerUsagePillsTests.MenuSurvivesLoadingHiddenPlanAndNarrowWidths);
         Run("pink credit hover lists each individual expiry", ComposerUsagePillsTests.CreditsHoverListsEachExpiry);
         Run("credit hover handles partial legacy and zero inventory", ComposerUsagePillsTests.CreditsHoverHandlesMissingAndEmptyInventory);
         Run("narrow layout preserves credits before tokens", ComposerUsagePillsTests.NarrowLayoutPreservesCreditsBeforeTokens);
+        Run("optional pills toggle independently without data loss", ComposerUsagePillsTests.OptionalPillsToggleIndependentlyWithoutDataLoss);
+        Run("pill visibility defaults and independent settings persist", OverlaySettingsTests.PillVisibilityDefaultsAndIndependentRoundTrip);
         Run("long usage status keeps the Token value visible", UsageDisplayTextTests.LongRateLimitStatusIsLocalizedAndTokenIsKept);
         Run("wide usage layout keeps detailed labels", UsageDisplayTextTests.WideLayoutKeepsDetailedLabels);
         Run("narrow usage layout prioritizes Token", UsageDisplayTextTests.NarrowLayoutPrioritizesToken);
@@ -112,6 +138,14 @@ internal static class ResetRadarTests
         Run("independent settings uses monotonic guide state", OverlaySettingsTests.IndependentSettingsUsesMonotonicGuideState);
         Run("placement persists and maps to three anchors", OverlaySettingsTests.PlacementRoundTripsAndCalculatesThreePositions);
         Run("unified PLUS menu keeps all seven pills separate", PlacementMenuLayoutTests.UnifiedMenuActionsUseSeparatePills);
+        Run("four positions and themes round trip", SidebarLayoutTests.FourPositionsAndThemesRoundTrip);
+        Run("sidebar and right popups honor DPI and monitor origins", SidebarLayoutTests.SidebarGeometryAndRightPopups);
+        Run("sidebar preserves pills and click targets", SidebarLayoutTests.SidebarPreservesPillsAndHitTargets);
+        Run("sidebar 5h menu and weekly hover are separate", SidebarLayoutTests.SidebarSeparatesMenuAndHover);
+        Run("host bars center and composer starts left", SidebarLayoutTests.HostBarsCenterAndComposerStartsLeft);
+        Run("sidebar boundary detection fails closed", SidebarLayoutTests.BoundaryDetectionDoesNotGuessCollapsedSidebar);
+        Run("dark palette contrast and light restoration", SidebarLayoutTests.DarkPaletteIsReadableAndRestoresLight);
+        Run("popup focus collapse and minimize policy", SidebarLayoutTests.PopupFocusAndCollapsePolicy);
         Run("dialogs center above PLUS", PopupAnchorPlacementTests.CentersDialogsAbovePlusWhenSpaceAllows);
         Run("nearly fitting updater stays above PLUS", PopupAnchorPlacementTests.KeepsNearlyFittingUpdaterAbovePlus);
         Run("dialogs fall below only when above cannot fit", PopupAnchorPlacementTests.FallsBelowOnlyWhenAboveCannotFit);
@@ -435,6 +469,30 @@ internal static class ResetRadarTests
             "\"url\":\"https://x.com/thsottiaux/status/" + postId + "\"}," +
             "\"confidence\":0.95,\"rationale\":\"" + rationale + "\"," +
             "\"text\":\"Test reset announcement.\"}";
+    }
+
+    private static void RunNativePipeFixtureInOwnProcess()
+    {
+        // Native asynchronous pipe teardown must not leak callbacks into later
+        // timer tests. This is a test boundary, not a production IPC change.
+        System.Diagnostics.ProcessStartInfo start = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
+            Arguments = "--isolated-native-ipc-fixture", UseShellExecute = false,
+            CreateNoWindow = true, WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        using (System.Diagnostics.Process child = System.Diagnostics.Process.Start(start))
+        {
+            if (!child.WaitForExit(30000))
+            {
+                child.Kill();
+                throw new InvalidOperationException("Isolated pipe fixture timed out");
+            }
+            if (child.ExitCode != 0)
+                throw new InvalidOperationException("Isolated pipe fixture failed (" + child.ExitCode + "): " +
+                    child.StandardOutput.ReadToEnd() + child.StandardError.ReadToEnd());
+        }
     }
 
     private static void Run(string name, Action test)

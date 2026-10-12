@@ -1,3 +1,4 @@
+param([string]$Executable)
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -33,7 +34,15 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     (Join-Path $projectRoot 'ComposerUsagePills.cs') `
     (Join-Path $projectRoot 'PlacementMenuLayout.cs') `
     (Join-Path $projectRoot 'PopupAnchorPlacement.cs') `
+    (Join-Path $projectRoot 'PopupUiContext.cs') `
+    (Join-Path $projectRoot 'CapsulePromptForm.cs') `
+    (Join-Path $projectRoot 'SidebarWindowProbe.cs') `
+    (Join-Path $projectRoot 'CodexClientUpdateForm.cs') `
+    (Join-Path $projectRoot 'tests\SidebarLayoutTests.cs') `
     (Join-Path $projectRoot 'UsageData.cs') `
+    (Join-Path $projectRoot 'AccountTokenPolicy.cs') `
+    (Join-Path $projectRoot 'SessionUsageReader.cs') `
+    (Join-Path $projectRoot 'tests\SessionUsageTests.cs') `
     (Join-Path $projectRoot 'UsageTrustPolicy.cs') `
     (Join-Path $projectRoot 'CodexAppServerClient.cs') `
     (Join-Path $projectRoot 'AutoResumePolicy.cs') `
@@ -66,6 +75,7 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     (Join-Path $projectRoot 'tests\OverlayInteractionTests.cs') `
     (Join-Path $projectRoot 'tests\ComposerUsagePillsTests.cs') `
     (Join-Path $projectRoot 'tests\PlacementMenuLayoutTests.cs') `
+    (Join-Path $projectRoot 'tests\CursorMessageTests.cs') `
     (Join-Path $projectRoot 'tests\PopupAnchorPlacementTests.cs') `
     (Join-Path $projectRoot 'tests\UsageTrustPolicyTests.cs') `
     (Join-Path $projectRoot 'tests\UsageDisplayTextTests.cs') `
@@ -82,4 +92,10 @@ if ($LASTEXITCODE -ne 0) {
 & (Join-Path $outputDir 'ResetRadarTests.exe')
 if ($LASTEXITCODE -ne 0) {
     throw "Tests failed with exit code $LASTEXITCODE"
+}
+
+if ($Executable) {
+    $taskExecutable = (Resolve-Path -LiteralPath $Executable).Path
+    & (Join-Path $outputDir 'ResetRadarTests.exe') ("--cursor-message-assembly=" + $taskExecutable)
+    if ($LASTEXITCODE -ne 0) { throw "Cursor message regression failed with exit code $LASTEXITCODE" }
 }

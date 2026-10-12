@@ -30,13 +30,13 @@ namespace CodexUsageOverlay
                 "5h 和周额度显示剩余百分比。悬停周额度查看重置与 Tibo 信息；悬停粉色券胶囊，逐张查看到期时间。",
                 "胶囊跟随 Codex；切到其他程序或最小化时自动隐藏。"),
             new GuidePage(
-                "点击 PLUS 打开菜单",
-                "顶部显示胶囊版本，可检查 GitHub 更新。显示位置可选上、中、下，也可更新 Codex 或调整刷新间隔。",
-                "两个悬停卡移开鼠标即收起；新 Tibo 横幅 10 秒后关闭。"),
+                "点击 5h 打开菜单",
+                "所有位置都点击 5h 开菜单；套餐、Token 与券可分别隐藏，仅留 5h 和周额度。侧栏弹窗向右展开。",
+                "悬停卡移开鼠标即收起；普通模式另有券到期详情，新 Tibo 横幅 10 秒后关闭。"),
             new GuidePage(
                 "额度恢复，自动续跑",
                 "新版默认在后台检测额度中断；额度恢复后，在原对话继续未完成任务，无需手动扫描或开启。",
-                "PLUS → 自动续跑可查看或暂停；关闭面板不会停止监测。"),
+                "5h → 自动续跑可查看或暂停；关闭面板不会停止监测。"),
             new GuidePage(
                 "哪些任务不会续跑",
                 "手动停止、已经完成、正在执行或等待审批的任务不会续跑。每个对话累计最多自动尝试 3 次。",
@@ -47,7 +47,7 @@ namespace CodexUsageOverlay
                 "不修改 Codex 安装文件；客户端更新需你主动点击。"),
             new GuidePage(
                 "以后随时可以再看",
-                "指引完成或跳过后不重复。需要回顾时，点击 PLUS → 刷新间隔 → 使用指引。",
+                "指引完成或跳过后不重复。需要回顾时，点击 5h → 刷新间隔 → 使用指引。",
                 "自动续跑默认开启；主动暂停后，下次启动仍保持暂停。")
         };
 
@@ -86,6 +86,7 @@ namespace CodexUsageOverlay
         private Color actionTextColor;
         private Color tipColor;
         private bool arrowOnTop = true;
+        private bool sidebarMode;
         private bool dismissedRaised;
         private int pageIndex;
         private float layoutScale = 1f;
@@ -209,6 +210,7 @@ namespace CodexUsageOverlay
             ApplyTheme(settings);
             RenderPage();
             ApplyBubbleRegion();
+            PopupUiContext.Bind(this, new Rectangle(0, 0, 1, 1));
         }
 
         protected override CreateParams CreateParams
@@ -240,6 +242,7 @@ namespace CodexUsageOverlay
                 e.Graphics.DrawPath(border, rounded);
             }
 
+            if (sidebarMode) return;
             Point[] arrow = ArrowPoints;
             using (Brush fill = new SolidBrush(bodyColor))
             using (Pen border = new Pen(borderColor, Math.Max(1f, DeviceDpi / 96f)))
@@ -336,6 +339,13 @@ namespace CodexUsageOverlay
                 tipColor = Color.FromArgb(14, 59, 80);
             }
 
+            if (theme == "RainbowText")
+            {
+                UpdateMenuPalette palette = UpdateMenuVisuals.CreateRainbowPalette();
+                bodyColor = palette.Surface; borderColor = palette.Border;
+                primaryTextColor = palette.Text; secondaryTextColor = palette.MutedText;
+                accentColor = palette.Accent; tipColor = palette.Hover;
+            }
             BackColor = bodyColor;
             contentPanel.BackColor = bodyColor;
             sectionLabel.ForeColor = theme == "OrangeGradient" || theme == "PinkGradient"
@@ -375,17 +385,10 @@ namespace CodexUsageOverlay
             if (!IsHandleCreated)
                 CreateControl();
             PerformLayout();
-            bool wasVisible = Visible;
-            Point previewLocation = Location;
-            if (!wasVisible)
-            {
-                Location = new Point(-2000, -2000);
-                Show();
-                Application.DoEvents();
-            }
             Bitmap preview = new Bitmap(Math.Max(1, Width), Math.Max(1, Height),
                 PixelFormat.Format32bppArgb);
-            DrawToBitmap(preview, new Rectangle(Point.Empty, preview.Size));
+            using (Graphics graphics = Graphics.FromImage(preview))
+                OnPaint(new PaintEventArgs(graphics, new Rectangle(Point.Empty, preview.Size)));
 
             // Borderless off-screen DrawToBitmap may omit children. Clear the
             // entire panel before the fallback draw: painting text twice causes
@@ -396,20 +399,17 @@ namespace CodexUsageOverlay
                 graphics.FillRectangle(fill, contentPanel.Bounds);
                 RenderPreviewControls(graphics, contentPanel, contentPanel.Left, contentPanel.Top);
             }
-            if (!wasVisible)
-            {
-                Hide();
-                Location = previewLocation;
-            }
             return preview;
         }
 
-        private static void RenderPreviewControls(
+        private void RenderPreviewControls(
             Graphics graphics, Control parent, int offsetX, int offsetY)
         {
             foreach (Control child in parent.Controls)
             {
-                if (!child.Visible || child.Width <= 0 || child.Height <= 0)
+                // Visible inherits the hidden preview form's state; use the
+                // actual page rule instead without ever showing a window.
+                if ((child == previousButton && pageIndex == 0) || child.Width <= 0 || child.Height <= 0)
                     continue;
 
                 int left = offsetX + child.Left;
@@ -430,17 +430,13 @@ namespace CodexUsageOverlay
                         bounds, label.TextAlign, label.AutoEllipsis);
                 else if (button != null)
                 {
-                    using (Brush fill = new SolidBrush(button.BackColor))
-                        graphics.FillRectangle(fill, bounds);
-                    if (button.FlatAppearance.BorderSize > 0)
+                    // Export the actual control renderer, not an idealized
+                    // rectangular substitute that can conceal runtime defects.
+                    using (Bitmap image = new Bitmap(button.Width, button.Height))
                     {
-                        using (Pen border = new Pen(button.FlatAppearance.BorderColor,
-                            button.FlatAppearance.BorderSize))
-                            graphics.DrawRectangle(border, bounds.Left, bounds.Top,
-                                bounds.Width - 1, bounds.Height - 1);
+                        button.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size));
+                        graphics.DrawImageUnscaled(image, left, top);
                     }
-                    DrawPreviewText(graphics, button.Text, button.Font, button.ForeColor,
-                        bounds, ContentAlignment.MiddleCenter, false);
                 }
 
                 if (child.HasChildren)
@@ -484,11 +480,22 @@ namespace CodexUsageOverlay
 
         public void UpdateAnchor(Rectangle anchorBounds, Rectangle workingArea)
         {
+            bool modeChanged = sidebarMode != (PopupUiContext.Placement == OverlayPlacement.Sidebar);
+            sidebarMode = PopupUiContext.Placement == OverlayPlacement.Sidebar;
             FitToWorkingArea(workingArea);
+            if (sidebarMode)
+            {
+                contentPanel.Top = ScaleValue(2);
+                Rectangle nextSidebarBounds = new Rectangle(PopupAnchorPlacement.NearPlus(anchorBounds, Size,
+                    workingArea, ScaleValue(LogicalGap)), Size);
+                if (Bounds != nextSidebarBounds) Bounds = nextSidebarBounds;
+                if (modeChanged) ApplyBubbleRegion();
+                return;
+            }
             bool nextArrowOnTop;
             Rectangle nextBounds = CalculateBubbleBounds(
                 anchorBounds, Size, workingArea, ScaleValue(LogicalGap), out nextArrowOnTop);
-            if (arrowOnTop != nextArrowOnTop)
+            if (modeChanged || arrowOnTop != nextArrowOnTop)
             {
                 arrowOnTop = nextArrowOnTop;
                 contentPanel.Top = arrowOnTop
@@ -526,6 +533,7 @@ namespace CodexUsageOverlay
         {
             get
             {
+                if (sidebarMode) return new Rectangle(1, 1, Math.Max(1, ClientSize.Width - 2), Math.Max(1, ClientSize.Height - 2));
                 int arrow = ScaleValue(ArrowHeight);
                 return arrowOnTop
                     ? new Rectangle(1, arrow, Math.Max(1, ClientSize.Width - 2),
@@ -563,12 +571,12 @@ namespace CodexUsageOverlay
 
         private Button CreateFooterButton(string text, Point location, Size size)
         {
-            Button button = new Button();
+            Button button = new UpdatePillButton(text, UpdateMenuVisuals.CreateRainbowPalette(), text == "下一步");
             button.Location = location;
             button.Size = size;
             button.Text = text;
             button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderSize = 0;
             button.Font = UiRendering.CreateTextFont(
                 "Microsoft YaHei UI", 9f, FontStyle.Bold);
             return button;
@@ -639,8 +647,11 @@ namespace CodexUsageOverlay
             using (Region region = new Region(rounded))
             using (GraphicsPath arrow = new GraphicsPath())
             {
-                arrow.AddPolygon(ArrowPoints);
-                region.Union(arrow);
+                if (!sidebarMode)
+                {
+                    arrow.AddPolygon(ArrowPoints);
+                    region.Union(arrow);
+                }
                 Region old = Region;
                 Region = region.Clone();
                 if (old != null)

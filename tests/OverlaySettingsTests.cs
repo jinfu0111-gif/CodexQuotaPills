@@ -7,6 +7,35 @@ namespace CodexUsageOverlay
 {
     internal static class OverlaySettingsTests
     {
+        public static void PillVisibilityDefaultsAndIndependentRoundTrip()
+        {
+            string path = Path.Combine(Path.GetTempPath(), "pills-visibility-" + Guid.NewGuid().ToString("N") + ".ini");
+            try
+            {
+                OverlaySettings defaults = OverlaySettingsStore.LoadFromPath(path);
+                Assert(defaults.ShowPlanPill && defaults.ShowTokenPill && defaults.ShowResetCreditsPill, "fresh install hides pills by default");
+                File.WriteAllLines(path, new[] { "Placement=Sidebar", "UiTheme=Dark", "RefreshSeconds=30",
+                    "OnboardingCompleted=True", "ShowPlanPill=invalid", "ShowTokenPill=invalid", "ShowResetCreditsPill=invalid" });
+                OverlaySettings legacy = OverlaySettingsStore.LoadFromPath(path);
+                Assert(legacy.ShowPlanPill && legacy.ShowTokenPill && legacy.ShowResetCreditsPill, "missing / invalid display flags changed defaults");
+                foreach (bool plan in new[] { false, true })
+                foreach (bool tokens in new[] { false, true })
+                foreach (bool credits in new[] { false, true })
+                {
+                    OverlaySettings draft = legacy.Clone();
+                    draft.ShowPlanPill = plan; draft.ShowTokenPill = tokens; draft.ShowResetCreditsPill = credits;
+                    Assert(OverlaySettingsStore.SavePreservingCompletedOnboardingToPath(draft, path), "visibility save failed");
+                    OverlaySettings loaded = OverlaySettingsStore.LoadFromPath(path);
+                    Assert(loaded.ShowPlanPill == plan && loaded.ShowTokenPill == tokens && loaded.ShowResetCreditsPill == credits, "independent flags did not persist");
+                    Assert(loaded.Placement == OverlayPlacement.Sidebar && loaded.UiTheme == "Dark" &&
+                        loaded.RefreshSeconds == 30 && loaded.OnboardingCompleted, "visibility changed unrelated settings");
+                    Assert(loaded.Clone().ShowPlanPill == plan && loaded.Clone().ShowTokenPill == tokens && loaded.Clone().ShowResetCreditsPill == credits,
+                        "settings draft lost display flags");
+                }
+            }
+            finally { if (File.Exists(path)) File.Delete(path); }
+        }
+
         public static void FirstRunGuideMigrationPreservesExistingUsers()
         {
             Assert(!OverlaySettingsStore.ResolveOnboardingCompleted(
@@ -155,7 +184,7 @@ namespace CodexUsageOverlay
         public static void CurrentGuideReplacesObsoleteControlsAndReplaysOnce()
         {
             string text = FirstRunGuideForm.AllPageText;
-            Assert(!text.Contains("↻") && !text.Contains("右键点击") && text.Contains("点击 PLUS") &&
+            Assert(!text.Contains("↻") && !text.Contains("右键点击") && !text.Contains("点击 PLUS") && text.Contains("点击 5h") &&
                 text.Contains("逐张查看到期时间") &&
                 text.Contains("无需手动扫描或开启"), "guide still describes obsolete controls or opt-in flow");
             OverlaySettings old = new OverlaySettings { OnboardingCompleted = true };

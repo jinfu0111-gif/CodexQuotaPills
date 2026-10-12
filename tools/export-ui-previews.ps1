@@ -6,6 +6,8 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $taskRoot 'docs\images
 $taskExe = (Resolve-Path -LiteralPath $Executable).Path
 $taskOutput = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $taskOutput -Force | Out-Null
+# Offline bitmap exports only: never Show / ShowDialog / Application.Run.
+# Hidden process startup is not sufficient if an exporter explicitly shows a form.
 # All modes exit before creating the live usage/automatic-resume services.
 $taskExports = @(
     @('composer','composer-pills-preview.png'),
@@ -13,8 +15,14 @@ $taskExports = @(
     @('reset-credits','reset-credits-hover-preview.png'),
     @('placement','unified-plus-menu-preview.png'),
     @('codex-updater','codex-update-preview.png'),
-    @('auto-resume','auto-resume-preview.png')
+    @('auto-resume','auto-resume-preview.png'),
+    @('session-usage','session-usage-preview.png')
 )
+$taskSideExport = Start-Process -FilePath $taskExe -ArgumentList ('--export-sidebar-previews="' + $taskOutput + '"') -WindowStyle Hidden -Wait -PassThru
+if ($taskSideExport.ExitCode -ne 0) { throw 'Sidebar preview export failed.' }
+$taskGuideOutput = Join-Path $taskOutput 'guide'
+$taskGuideExport = Start-Process -FilePath $taskExe -ArgumentList ('--export-guide-previews="' + $taskGuideOutput + '"') -WindowStyle Hidden -Wait -PassThru
+if ($taskGuideExport.ExitCode -ne 0) { throw 'Guide preview export failed.' }
 foreach ($taskExport in $taskExports) {
     $taskFile = Join-Path $taskOutput $taskExport[1]
     $taskArgument = '--export-' + $taskExport[0] + '-preview="' + $taskFile + '"'

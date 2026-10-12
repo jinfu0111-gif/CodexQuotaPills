@@ -110,6 +110,7 @@ namespace CodexUsageOverlay
             };
             FormClosing += OnClosing;
             SetLocationNear(anchor);
+            PopupUiContext.Bind(this, anchor, palette);
         }
 
         protected override CreateParams CreateParams
@@ -348,12 +349,10 @@ namespace CodexUsageOverlay
         {
             DialogResult result = (DialogResult)Invoke(new Func<DialogResult>(delegate
             {
-                return MessageBox.Show(this,
-                    "Codex 正在运行。\n\n【否】下次完全退出 Codex 后生效（推荐）" +
-                    "\n【是】立即关闭 Codex 并安装，可能中断当前任务" +
-                    "\n【取消】放弃安装",
-                    "Codex 正在运行", MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                using (CapsulePromptForm form = new CapsulePromptForm("Codex 正在运行",
+                    "推荐选择“退出后生效”，保留正在执行的任务。\n\n“立即关闭并更新”会关闭 Codex，可能中断当前任务；取消则放弃本次安装。",
+                    PopupUiContext.Anchor.IsEmpty ? Bounds : PopupUiContext.Anchor, true))
+                    return form.ShowDialog(this);
             }));
             if (result == DialogResult.Yes) return InUseDecision.ForceShutdown;
             if (result == DialogResult.No) return InUseDecision.DeferToNextExit;
@@ -434,23 +433,20 @@ namespace CodexUsageOverlay
             installedValue.Text = "示例 · 26.1002.7124.0";
             latestValue.Text = "示例 · 26.1002.7124.0";
             status.Text = "界面示例；实际版本请点击“检查更新”查询。";
-            Location = new Point(-32000, -32000);
-            Show();
-            Application.DoEvents();
-            using (Bitmap image = new Bitmap(Width, Height))
+            PerformLayout();
+            using (Bitmap image = UiRendering.RenderOffscreen(this))
             {
-                DrawToBitmap(image, new Rectangle(Point.Empty, Size));
                 image.Save(path, ImageFormat.Png);
             }
-            Hide();
         }
     }
 
-    internal sealed class UpdatePillButton : Control
+    internal sealed class UpdatePillButton : Button
     {
         private readonly UpdateMenuPalette palette;
         private readonly bool primary;
         private bool hovered;
+        internal bool Danger;
 
         internal UpdatePillButton(string text, UpdateMenuPalette palette, bool primary)
         {
@@ -459,6 +455,9 @@ namespace CodexUsageOverlay
             this.primary = primary;
             Cursor = Cursors.Hand;
             Font = UiRendering.CreateTextFont("Microsoft YaHei UI", 9f, FontStyle.Bold);
+            UseVisualStyleBackColor = false;
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         }
@@ -479,12 +478,18 @@ namespace CodexUsageOverlay
 
         protected override void OnEnabledChanged(EventArgs e)
         {
+            Cursor = Enabled ? Cursors.Hand : Cursors.Default;
             Invalidate();
             base.OnEnabledChanged(e);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            // ButtonBase is Opaque: it skips background painting. Paint the
+            // entire client area before the rounded pill, not just its interior.
+            // Otherwise corners retain uninitialized/stale buffer pixels.
+            e.Graphics.Clear(Parent == null ? QuotaPillVisuals.CardSurface : Parent.BackColor);
+            palette.CopyFrom(UpdateMenuVisuals.CreateRainbowPalette());
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             Rectangle bounds = new Rectangle(0, 0, Width - 1, Height - 1);
             int radius = Math.Min(Height / 2, 16);
@@ -498,7 +503,7 @@ namespace CodexUsageOverlay
                 path.CloseFigure();
                 Color fill = !Enabled ? palette.SurfaceAlt :
                     primary ? (hovered ? Color.FromArgb(91, 51, 162) : palette.Accent) :
-                    hovered ? palette.Hover : Color.White;
+                    hovered ? (Danger ? palette.DangerHover : palette.Hover) : QuotaPillVisuals.Surface;
                 using (SolidBrush brush = new SolidBrush(fill))
                 using (Pen border = new Pen(primary && Enabled ? palette.Accent : palette.Border))
                 {
@@ -506,7 +511,7 @@ namespace CodexUsageOverlay
                     e.Graphics.DrawPath(border, path);
                 }
             }
-            Color text = !Enabled ? palette.MutedText : primary ? Color.White : palette.Text;
+            Color text = !Enabled ? palette.MutedText : primary ? Color.White : Danger ? palette.Danger : palette.Text;
             TextRenderer.DrawText(e.Graphics, Text, Font, bounds, text,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
                 TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);

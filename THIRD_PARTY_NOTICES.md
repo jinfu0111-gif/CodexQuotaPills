@@ -1,5 +1,16 @@
 # Third-Party Notices
 
+## Reference reviewed: Codex Usage Badge
+
+- Project: https://github.com/jaykinhoo9/codex-usage-badge
+- Reviewed: `src/thread-token-reader.js`, main branch, 2026-10-09 (MIT).
+- Only the read-only metadata-query / newest-schema design was used as a
+  reference. `SessionUsageReader.cs` is independently implemented against
+  Windows' built-in SQLite library. No upstream source code, executable,
+  Node runtime, DOM injection or CDP installer is included.
+- Token/cache/context semantics checked against OpenAI documentation and
+  protocol source; no official endorsement or API billing equivalence claimed.
+
 ## Codex Auto Resume
 
 - Project: https://github.com/progressrdx/codex-auto-resume

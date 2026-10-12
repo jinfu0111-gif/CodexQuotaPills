@@ -16,6 +16,12 @@ namespace CodexUsageOverlay
         public Color Hover;
         public Color Danger;
         public Color DangerHover;
+        internal void CopyFrom(UpdateMenuPalette other)
+        {
+            Surface = other.Surface; SurfaceAlt = other.SurfaceAlt; Border = other.Border;
+            Text = other.Text; MutedText = other.MutedText; Accent = other.Accent;
+            Hover = other.Hover; Danger = other.Danger; DangerHover = other.DangerHover;
+        }
     }
 
     internal static class UpdateMenuVisuals
@@ -25,6 +31,15 @@ namespace CodexUsageOverlay
 
         internal static UpdateMenuPalette CreateRainbowPalette()
         {
+            if (PopupUiContext.Dark)
+                return new UpdateMenuPalette
+                {
+                    Surface = QuotaPillVisuals.CardSurface, SurfaceAlt = QuotaPillVisuals.Surface,
+                    Border = Color.FromArgb(83, 94, 113), Text = QuotaPillVisuals.Text,
+                    MutedText = QuotaPillVisuals.MutedText, Accent = Color.FromArgb(139, 92, 246),
+                    Hover = Color.FromArgb(55, 44, 78), Danger = Color.FromArgb(255, 130, 159),
+                    DangerHover = Color.FromArgb(66, 35, 47)
+                };
             return new UpdateMenuPalette
             {
                 Surface = Color.FromArgb(248, 249, 252),

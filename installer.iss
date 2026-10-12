@@ -1,5 +1,5 @@
 #define MyAppName "Codex Quota Pills"
-#define MyAppVersion "0.2.24"
+#define MyAppVersion "0.2.33"
 #define MyAppExeName "CodexQuotaPills.exe"
 
 [Setup]

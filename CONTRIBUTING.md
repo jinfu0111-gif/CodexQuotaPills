@@ -9,7 +9,7 @@
 3. 保持额度访问只读，不得加入账户或额度写操作。
 4. 不要记录或提交 access token、refresh token、Cookie、认证请求头、邮箱或本机路径。
 5. 修改额度解析、窗口定位或鼠标穿透逻辑时必须补测试。
-6. 提交前再次运行 `.\test.ps1` 和 `.\build.ps1`。
+6. 提交前运行 `.\build.ps1`、`.\test.ps1 -Executable .\bin\CodexQuotaPills.exe` 和 `.\tests\InstallTests.ps1`，同时检查实际程序集的指针消息分支。UI 配图仅离屏导出；前台窗口验证需用户明确同意。
 
 ## 代码约束
 

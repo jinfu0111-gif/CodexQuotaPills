@@ -1,19 +1,27 @@
-param([Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version)
+param([Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version, [string]$Executable)
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $taskDist = Join-Path $taskRoot 'dist'
-$taskExe = Join-Path $taskRoot 'bin\CodexQuotaPills.exe'
+$taskExe = if ($Executable) { (Resolve-Path -LiteralPath $Executable).Path } else { Join-Path $taskRoot 'bin\CodexQuotaPills.exe' }
 if ((Get-Item -LiteralPath $taskExe).VersionInfo.FileVersion -ne "$Version.0") { throw 'Executable version does not match release.' }
 $taskPortable = Join-Path $taskDist "CodexQuotaPills-$Version-portable"
 $taskSource = Join-Path $taskDist "CodexQuotaPills-$Version-source"
-$taskPublicDocs = @('README.md','INSTALL.md','CHANGELOG.md','LICENSE','NOTICE.md','THIRD_PARTY_NOTICES.md','SECURITY.md','FALSE_POSITIVE_GUIDE.md')
+$taskPublicDocs = @('README.md','INSTALL.md','CHANGELOG.md','CONTRIBUTING.md','LICENSE','NOTICE.md','THIRD_PARTY_NOTICES.md','SECURITY.md','FALSE_POSITIVE_GUIDE.md')
 # Explicit current product documents and illustrations, never the whole docs tree.
 $taskProductDocs = @(
     'docs\desktop-ipc-compatibility.md',
+    'docs\session-usage.md',
+    'docs\images\session-usage-preview.png',
     'docs\reset-radar-banner-preview.md',
     'docs\licenses\codex-auto-resume-MIT.txt',
     'docs\images\composer-pills-preview.png',
+    'docs\images\minimal-pills-preview.png',
+    'docs\images\placement-bars-preview.png',
     'docs\images\unified-plus-menu-preview.png',
+    'docs\images\sidebar-light-preview.png',
+    'docs\images\sidebar-dark-preview.png',
+    'docs\images\sidebar-quota-details-preview.png',
+    'docs\images\guide\guide-4.png',
     'docs\images\codex-update-preview.png',
     'docs\images\auto-resume-menu-preview.png',
     'docs\images\auto-resume-preview.png',
@@ -27,7 +35,7 @@ $taskProductDocs = @(
     'docs\images\reset-radar-banner-close-preview.png',
     'docs\images\reset-radar-banner-close-preview@2x.png'
 )
-$taskInstallerAssets = @('app-icon.ico','app-icon.png','usage-cache.ini')
+$taskInstallerAssets = @('app-icon.ico','app-icon.png','usage-cache.ini','AGENTS.public.md')
 foreach ($taskRequired in @($taskPublicDocs + $taskProductDocs + @('install.ps1','install-release.json','installer-assets\AGENTS.public.md') + @($taskInstallerAssets | ForEach-Object { 'installer-assets\' + $_ }))) {
     if (-not (Test-Path -LiteralPath (Join-Path $taskRoot $taskRequired) -PathType Leaf)) { throw "Missing public package input: $taskRequired" }
 }

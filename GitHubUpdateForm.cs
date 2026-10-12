@@ -9,19 +9,21 @@ namespace CodexUsageOverlay
     {
         private readonly GitHubReleaseUpdateService service;
         private readonly Label status = new Label();
-        private readonly Button check = new Button();
-        private readonly Button download = new Button();
-        private readonly Button install = new Button();
+        private readonly Button check = new UpdatePillButton("重新检查", UpdateMenuVisuals.CreateRainbowPalette(), false);
+        private readonly Button download = new UpdatePillButton("下载并校验", UpdateMenuVisuals.CreateRainbowPalette(), false);
+        private readonly Button install = new UpdatePillButton("启用新版本", UpdateMenuVisuals.CreateRainbowPalette(), true);
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         private readonly object sync = new object();
         private GitHubUpdateStage staged;
         private bool busy;
         private string message;
         private System.Diagnostics.Process helper;
+        private readonly bool preview;
 
-        internal GitHubUpdateForm(GitHubReleaseUpdateService updates, Rectangle? anchor = null)
+        internal GitHubUpdateForm(GitHubReleaseUpdateService updates, Rectangle? anchor = null, bool previewMode = false)
         {
             service = updates;
+            preview = previewMode;
             Text = "额度胶囊 · GitHub 更新"; ClientSize = new Size(460, 238);
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
             TopMost = true; ShowInTaskbar = !anchor.HasValue; AutoScaleMode = AutoScaleMode.Dpi;
@@ -46,7 +48,8 @@ namespace CodexUsageOverlay
             if (anchor.HasValue) Location = PopupAnchorPlacement.NearPlus(anchor.Value, Size,
                 Screen.FromRectangle(anchor.Value).WorkingArea, 8);
             timer.Interval = 400; timer.Tick += delegate { RefreshState(); }; timer.Start();
-            Shown += delegate { service.RequestCheck(true); RefreshState(); };
+            Shown += delegate { if (!preview) service.RequestCheck(true); RefreshState(); };
+            if (anchor.HasValue) PopupUiContext.Bind(this, anchor.Value);
         }
 
         private void Download(object sender, EventArgs args)
@@ -68,6 +71,12 @@ namespace CodexUsageOverlay
 
         private void RefreshState()
         {
+            if (preview)
+            {
+                status.Text = "示例预览：下载校验后，手动启用新版本。";
+                check.Enabled = download.Enabled = install.Enabled = false;
+                return;
+            }
             GitHubReleaseUpdateSnapshot value = service.Snapshot();
             lock (sync)
             {

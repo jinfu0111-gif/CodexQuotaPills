@@ -6,10 +6,11 @@ namespace CodexUsageOverlay
     // One palette for the quota pills and their transient reminder.
     internal static class QuotaPillVisuals
     {
-        internal static readonly Color Surface = Color.FromArgb(244, 255, 255, 255);
-        internal static readonly Color Border = Color.FromArgb(58, 100, 116, 139);
-        internal static readonly Color Text = Color.FromArgb(255, 82, 88, 98);
-        internal static readonly Color MutedText = Color.FromArgb(255, 100, 110, 125);
+        internal static Color Surface { get { return PopupUiContext.Dark ? Color.FromArgb(248, 36, 41, 52) : Color.FromArgb(244, 255, 255, 255); } }
+        internal static Color CardSurface { get { return PopupUiContext.Dark ? Color.FromArgb(255, 28, 33, 43) : Color.FromArgb(255, 248, 249, 252); } }
+        internal static Color Border { get { return PopupUiContext.Dark ? Color.FromArgb(180, 83, 94, 113) : Color.FromArgb(58, 100, 116, 139); } }
+        internal static Color Text { get { return PopupUiContext.Dark ? Color.FromArgb(235, 239, 246) : Color.FromArgb(255, 82, 88, 98); } }
+        internal static Color MutedText { get { return PopupUiContext.Dark ? Color.FromArgb(167, 178, 197) : Color.FromArgb(255, 100, 110, 125); } }
         internal static readonly Color Shadow = Color.FromArgb(25, 15, 23, 42);
         internal static readonly Color CompletedAccent = Color.FromArgb(16, 185, 129);
         internal static readonly Color ScheduledAccent = Color.FromArgb(245, 158, 11);

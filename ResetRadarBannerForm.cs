@@ -68,7 +68,7 @@ namespace CodexUsageOverlay
                 : String.Empty;
             string revision = radar.RevisionKey + "|" + settings.Theme + "|" +
                 settings.CustomBackgroundArgb.ToString() + "|" + settings.FontName + "|" +
-                dpiScale.ToString("0.###") + "|" +
+                dpiScale.ToString("0.###") + "|" + PopupUiContext.ThemeRevision + "|" +
                 (hovered ? "hover" : "normal") + "|" + (closeHovered ? "close" : "open") + "|" + clockRevision;
             bool becameVisible = !Visible;
             if (becameVisible)

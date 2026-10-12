@@ -1,6 +1,6 @@
 # 重置信息横幅效果图
 
-这组图片由当前本机 0.2.24 程序的真实绘制函数导出，使用默认字体；横幅与额度胶囊共享浅色背景、边框与文字色。公告内容、日期和置信度是固定示例，不代表真实 Tibo 公告。导出不访问网络、不弹出真实提醒，也不改变已读或自动续跑记录。构建后运行 `tools/export-ui-previews.ps1` 可重新生成。
+这组图片由 0.2.33 程序的真实绘制函数离屏导出，使用默认字体；横幅与额度胶囊共享浅色背景、边框与文字色。公告内容、日期和置信度是固定示例，不代表真实 Tibo 公告。导出不访问网络、不弹出真实提醒，也不改变已读或自动续跑记录。构建后运行 `tools/export-ui-previews.ps1` 可重新生成。
 
 | 状态 | 原尺寸 | 清晰版（200% DPI） |
 | --- | --- | --- |
@@ -16,6 +16,6 @@
 
 ![悬停关闭按钮](images/reset-radar-banner-close-preview.png)
 
-绘制对应 [ResetRadarBannerForm.cs](../ResetRadarBannerForm.cs) 的 `BuildRenderedBitmap`，共享颜色、两行布局、圆形关闭按钮和点击区域对应 [ResetRadarBannerVisuals.cs](../ResetRadarBannerVisuals.cs)。标题与详情文案由 [ResetRadarService.cs](../ResetRadarService.cs) 的 `ResetRadarDisplay` 生成；展示时机由 [ResetRadarBannerPolicy.cs](../ResetRadarBannerPolicy.cs) 控制。
+绘制对应 [ResetRadarBannerForm.cs](https://github.com/jinfu0111-gif/CodexQuotaPills/blob/main/ResetRadarBannerForm.cs) 的 `BuildRenderedBitmap`，共享颜色、两行布局、圆形关闭按钮和点击区域对应 [ResetRadarBannerVisuals.cs](https://github.com/jinfu0111-gif/CodexQuotaPills/blob/main/ResetRadarBannerVisuals.cs)。标题与详情文案由 [ResetRadarService.cs](https://github.com/jinfu0111-gif/CodexQuotaPills/blob/main/ResetRadarService.cs) 的 `ResetRadarDisplay` 生成；展示时机由 [ResetRadarBannerPolicy.cs](https://github.com/jinfu0111-gif/CodexQuotaPills/blob/main/ResetRadarBannerPolicy.cs) 控制。
 
-上述外观与点击区域已用于本机 0.2.24，提醒时机和防重播保持。效果图及本说明随独立本机包放在 `dist/CodexQuotaPills-0.2.24-portable/docs/`；旧版本保留，未同步 GitHub。
+效果图及本说明随 0.2.33 正式便携包和源码包的 `docs/` 目录提供。图中数据仅用于展示，实际公告以程序校验后的公开来源为准。

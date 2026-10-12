@@ -76,6 +76,7 @@ namespace CodexUsageOverlay
             };
             KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); };
             Location = PopupAnchorPlacement.NearPlus(anchor, Size, Screen.FromRectangle(anchor).WorkingArea);
+            PopupUiContext.Bind(this, anchor, palette);
         }
 
         private Label Label(string text, Rectangle bounds)
@@ -162,11 +163,11 @@ namespace CodexUsageOverlay
             toggle.Text = "暂停自动续跑";
             list.Items.Add(new ResumeCandidate { Title = "示例 · 完成胶囊功能开发", Status = "等待 5h / 周额度恢复 · 10/8 18:30" });
             list.Items.Add(new ResumeCandidate { Title = "示例 · 修复测试并验证", Status = "额度中断 · 等待原对话状态验证" });
-            Show();
-            Application.DoEvents();
-            using (Bitmap bitmap = new Bitmap(Width, Height))
-            { DrawToBitmap(bitmap, new Rectangle(Point.Empty, Size)); bitmap.Save(path, ImageFormat.Png); }
-            Hide();
+            PerformLayout();
+            using (Bitmap bitmap = UiRendering.RenderOffscreen(this))
+            {
+                bitmap.Save(path, ImageFormat.Png);
+            }
         }
     }
 }

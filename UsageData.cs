@@ -27,6 +27,10 @@ namespace CodexUsageOverlay
         public bool HasResetCreditDetails;
         public string ProfileTokensText = String.Empty;
         public long? LifetimeTokens;
+        public bool AccountTokensChecked;
+        public string AccountTokenIdentity = String.Empty;
+        public DateTime AccountTokenReadUtc = DateTime.MinValue;
+        internal DateTime PendingTokenZeroUtc = DateTime.MinValue;
         public string Source = "缓存";
         public string LastError = String.Empty;
         public DateTime UpdatedUtc = DateTime.MinValue;
@@ -180,13 +184,15 @@ namespace CodexUsageOverlay
                     changed = true;
                 }
             }
-            if (!String.IsNullOrWhiteSpace(incoming.ProfileTokensText) &&
+            if (incoming.AccountTokensChecked)
+                changed |= AccountTokenPolicy.Apply(target, incoming);
+            else if (!String.IsNullOrWhiteSpace(incoming.ProfileTokensText) &&
                 incoming.ProfileTokensText != "待刷新" && target.ProfileTokensText != incoming.ProfileTokensText)
             {
                 target.ProfileTokensText = incoming.ProfileTokensText;
                 changed = true;
             }
-            if (incoming.LifetimeTokens.HasValue && target.LifetimeTokens != incoming.LifetimeTokens)
+            if (!incoming.AccountTokensChecked && incoming.LifetimeTokens.HasValue && target.LifetimeTokens != incoming.LifetimeTokens)
             {
                 target.LifetimeTokens = incoming.LifetimeTokens;
                 changed = true;

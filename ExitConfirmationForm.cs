@@ -35,14 +35,14 @@ namespace CodexUsageOverlay
             detail.Size = new Size(280, 36);
             Controls.Add(detail);
 
-            Button cancel = new Button();
+            Button cancel = new UpdatePillButton("取消", UpdateMenuVisuals.CreateRainbowPalette(), false);
             cancel.Text = "取消";
             cancel.Location = new Point(134, 96);
             cancel.Size = new Size(76, 29);
             cancel.DialogResult = DialogResult.Cancel;
             Controls.Add(cancel);
 
-            Button exit = new Button();
+            Button exit = new UpdatePillButton("退出", UpdateMenuVisuals.CreateRainbowPalette(), false) { Danger = true };
             exit.Text = "退出";
             exit.Location = new Point(220, 96);
             exit.Size = new Size(76, 29);
@@ -54,6 +54,7 @@ namespace CodexUsageOverlay
             CancelButton = cancel;
             PositionNearPlus(plusAnchor);
             Shown += delegate { PositionNearPlus(plusAnchor); };
+            PopupUiContext.Bind(this, plusAnchor);
         }
 
         private void PositionNearPlus(Rectangle anchor)

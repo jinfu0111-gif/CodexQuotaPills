@@ -5,6 +5,46 @@ namespace CodexUsageOverlay
 {
     internal static class ComposerUsagePillsTests
     {
+        public static void OptionalPillsToggleIndependentlyWithoutDataLoss()
+        {
+            UsageData usage = new UsageData { Plan = "Plus", ShortRemaining = 79, WeeklyRemaining = 68,
+                ProfileTokensText = "11.6亿", LifetimeTokens = 1160000000L, AvailableResetCredits = 2,
+                HasResetCreditDetails = true, ResetCreditExpiries = new long?[] { 1787500000L, 1788500000L } };
+            using (Bitmap canvas = new Bitmap(600, 120))
+            using (Graphics graphics = Graphics.FromImage(canvas))
+            using (Font font = new Font("Microsoft Sans Serif", 8f))
+            {
+                int coreWidth = 0;
+                foreach (bool plan in new[] { false, true })
+                foreach (bool tokens in new[] { false, true })
+                foreach (bool credits in new[] { false, true })
+                {
+                    OverlaySettings settings = new OverlaySettings { ShowPlanPill = plan, ShowTokenPill = tokens, ShowResetCreditsPill = credits };
+                    int width = ComposerUsagePillLayout.MeasureWidth(usage, graphics, font, settings);
+                    ComposerUsagePillLayout layout = ComposerUsagePillLayout.Create(usage, graphics, font, width, settings);
+                    Assert(layout.Pills.Count == 2 + (plan ? 1 : 0) + (tokens ? 1 : 0) + (credits ? 1 : 0), "hidden pills leave placeholder / displace quotas");
+                    Assert(layout.Pills.Exists(p => p.Kind == ComposerUsagePillKind.Plan) == plan, "plan switch is not independent");
+                    Assert(layout.Pills.Exists(p => p.Kind == ComposerUsagePillKind.Tokens) == tokens, "Token switch is not independent");
+                    Assert(layout.Pills.Exists(p => p.Kind == ComposerUsagePillKind.ResetCredits) == credits, "credit switch is not independent");
+                    Assert(String.Join("|", ComposerUsagePillLayout.BuildTexts(usage, settings)).Contains("Token ") == tokens,
+                        "text and measured layout disagree");
+                    foreach (ComposerUsagePill pill in layout.Pills)
+                        Assert(new Rectangle(0, 0, width, 28).Contains(pill.Bounds), "visible pill is clipped");
+                    if (!tokens && !credits) coreWidth = width;
+                    else Assert(width > ComposerUsagePillLayout.MeasureWidth(usage, graphics, font,
+                        new OverlaySettings { ShowPlanPill = plan, ShowTokenPill = false, ShowResetCreditsPill = false }), "hidden pills kept unused width");
+                    ComposerUsagePillLayout sidebar = ComposerUsagePillLayout.CreateSidebar(usage, graphics, font, 40);
+                    Assert(sidebar.Pills.Count == 2 && sidebar.Pills[0].Kind == ComposerUsagePillKind.ShortQuota &&
+                        sidebar.Pills[1].Kind == ComposerUsagePillKind.WeeklyQuota, "preferences added optional pills to sidebar");
+                }
+                Assert(coreWidth > 0 && usage.LifetimeTokens == 1160000000L && usage.ProfileTokensText == "11.6亿" &&
+                    usage.AvailableResetCredits == 2 && usage.ResetCreditExpiries.Length == 2, "display switch mutated source data");
+                Assert(ComposerUsagePillTooltips.BuildCreditsCard(usage).DetailLines.Length > 1, "hiding removed credit expiry detail");
+                Assert(String.Join("|", ComposerUsagePillTooltips.BuildSidebarCard(usage, null, DateTimeOffset.Now).DetailLines).Contains("11.6亿"),
+                    "hiding the Token pill removed account summary details");
+            }
+        }
+
         public static void NativeQuotaFieldsAreExposed()
         {
             UsageData usage = new UsageData
@@ -34,7 +74,7 @@ namespace CodexUsageOverlay
             };
 
             string joined = String.Join("|", ComposerUsagePillLayout.BuildTexts(usage));
-            Assert(joined == "PRO", joined);
+            Assert(joined == "PRO|5h —", joined);
         }
 
         public static void PercentagesAreClamped()
@@ -122,15 +162,15 @@ namespace CodexUsageOverlay
             {
                 ComposerUsagePillLayout layout = ComposerUsagePillLayout.Create(
                     usage, graphics, font, bitmap.Width);
-                ComposerUsagePill plan = layout.Pills[0];
+                ComposerUsagePill plan = layout.Pills.Find(p => p.Kind == ComposerUsagePillKind.ShortQuota);
                 Point forgivingEdge = new Point(
                     plan.Bounds.Left - 2,
                     plan.Bounds.Top + plan.Bounds.Height / 2);
                 Assert(layout.HitTest(forgivingEdge) == null,
                     "exact hit test unexpectedly included the outer edge");
                 Assert(layout.HitTest(
-                    ComposerUsagePillKind.Plan, forgivingEdge, 3, 2) == plan,
-                    "expanded PLUS hit target missed the outer edge");
+                    ComposerUsagePillKind.ShortQuota, forgivingEdge, 3, 2) == plan,
+                    "expanded 5h hit target missed the outer edge");
             }
         }
 
@@ -199,6 +239,30 @@ namespace CodexUsageOverlay
                     layout.Pills.Exists(p => p.Kind == ComposerUsagePillKind.ShortQuota) &&
                     layout.Pills.Exists(p => p.Kind == ComposerUsagePillKind.WeeklyQuota),
                     "credits displaced core quotas in narrow layout");
+            }
+        }
+
+        public static void MenuSurvivesLoadingHiddenPlanAndNarrowWidths()
+        {
+            OverlaySettings minimal = new OverlaySettings { ShowPlanPill = false, ShowTokenPill = false, ShowResetCreditsPill = false };
+            using (Bitmap canvas = new Bitmap(500, 32))
+            using (Graphics graphics = Graphics.FromImage(canvas))
+            using (Font font = new Font("Microsoft Sans Serif", 8f))
+            {
+                foreach (UsageData usage in new[] { null, new UsageData { HasShortRemaining = true },
+                    new UsageData { Plan = "5h long custom plan", ShortRemaining = 0, WeeklyRemaining = 64,
+                        ProfileTokensText = "20.4亿", AvailableResetCredits = 3 } })
+                foreach (OverlaySettings settings in new[] { minimal, new OverlaySettings() })
+                foreach (int width in new[] { 80, 110, 160, 500 })
+                {
+                    ComposerUsagePillLayout layout = ComposerUsagePillLayout.Create(usage, graphics, font, width, settings);
+                    ComposerUsagePill menu = layout.Pills.Find(p => p.Kind == ComposerUsagePillKind.ShortQuota);
+                    Assert(menu != null && new Rectangle(0, 0, width, 28).Contains(menu.Bounds), "5h menu was trimmed or clipped");
+                    Assert(layout.HitTest(new Point(menu.Bounds.Left + menu.Bounds.Width / 2, 14)) == menu, "loading menu is not clickable");
+                    Assert(menu.Text == (usage != null && usage.ShortRemaining.HasValue ? "5h 0%" : "5h —"), "unknown quota masquerades as zero");
+                }
+                Assert(String.Join("|", ComposerUsagePillLayout.BuildTexts(new UsageData { ShortRemaining = 71, WeeklyRemaining = 61 }, minimal)) ==
+                    "5h 71%|周 61%", "minimal mode did not reduce to two quota pills");
             }
         }
 

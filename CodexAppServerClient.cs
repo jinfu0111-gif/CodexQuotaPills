@@ -70,6 +70,15 @@ namespace CodexUsageOverlay
                         return false;
                     }
 
+                    usage.AccountTokensChecked = true;
+                    IDictionary<string, object> accountFields = ReadObject(account, "account");
+                    string identity = ReadString(accountFields, "accountId");
+                    if (String.IsNullOrWhiteSpace(identity))
+                    {
+                        identity = ReadString(accountFields, "email");
+                        if (identity != null) identity = identity.Trim().ToLowerInvariant();
+                    }
+                    usage.AccountTokenIdentity = AccountTokenPolicy.Identity(identity);
                     IDictionary<string, object> tokenUsage = SendRequest("account/usage/read", null);
                     if (tokenUsage != null)
                         ParseTokenUsage(tokenUsage, usage);

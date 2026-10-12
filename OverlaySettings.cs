@@ -12,11 +12,61 @@ namespace CodexUsageOverlay
     {
         TitleBar,
         ContentTop,
-        ComposerBottom
+        ComposerBottom,
+        Sidebar
     }
 
     internal static class OverlayPlacementLayout
     {
+        internal static Rectangle CalculateBounds(OverlayPlacement placement, Rectangle window,
+            Rectangle area, Size preferred, float scale, Rectangle sidebar)
+        {
+            Func<int, int> pixels = value => Math.Max(1, (int)Math.Round(value * scale));
+            if (placement == OverlayPlacement.Sidebar)
+            {
+                // Only use the empty lower part of the narrow navigation rail.
+                // Short windows fall back through the tray instead of covering icons.
+                if (sidebar.Width < pixels(40) || sidebar.Width > pixels(80) || sidebar.Height < pixels(700))
+                    return Rectangle.Empty;
+                int width = pixels(ComposerUsagePillLayout.SidebarWidth);
+                int height = pixels(ComposerUsagePillLayout.SidebarHeight);
+                int left = sidebar.Left + (sidebar.Width - width) / 2;
+                int top = sidebar.Bottom - pixels(116) - height;
+                Rectangle result = new Rectangle(left, top, width, height);
+                return area.Contains(result) ? result : Rectangle.Empty;
+            }
+            // Separate host rectangles. The OS menu bar is not the chat pane:
+            // its free space ends before the three caption buttons.
+            int contentLeft = window.Left + (window.Width >= pixels(900) ? pixels(290) : pixels(52));
+            Rectangle host;
+            if (placement == OverlayPlacement.TitleBar)
+                host = Rectangle.FromLTRB(window.Left + pixels(320), window.Top,
+                    window.Right - pixels(138), window.Top + pixels(44));
+            else if (placement == OverlayPlacement.ContentTop)
+                host = Rectangle.FromLTRB(contentLeft, window.Top + pixels(44), window.Right, window.Top + pixels(96));
+            else
+            {
+                int composerWidth = Math.Min(pixels(736), window.Right - contentLeft - pixels(32));
+                int composerLeft = contentLeft + (window.Right - contentLeft - composerWidth) / 2;
+                // Start immediately after the native + / approval controls;
+                // keep the model, microphone and send controls unobstructed.
+                host = new Rectangle(composerLeft + pixels(130), window.Bottom - pixels(56),
+                    composerWidth - pixels(130 + 184), pixels(28));
+            }
+            return InHost(placement, host, area, preferred, scale);
+        }
+
+        internal static Rectangle InHost(OverlayPlacement placement, Rectangle host, Rectangle area, Size preferred, float scale = 1f)
+        {
+            // Do not draw over native controls when there is no usable space.
+            if (host.Width < (int)Math.Round(110 * scale) || host.Height < Math.Min(preferred.Height, (int)Math.Round(24 * scale)))
+                return Rectangle.Empty;
+            int width = Math.Min(preferred.Width, host.Width);
+            int left = placement == OverlayPlacement.ComposerBottom ? host.Left : host.Left + (host.Width - width) / 2;
+            Rectangle result = new Rectangle(left, host.Top + (host.Height - preferred.Height) / 2, width, preferred.Height);
+            return area.Contains(result) ? result : Rectangle.Empty;
+        }
+
         internal static int CalculateTop(
             OverlayPlacement placement,
             int windowTop,
@@ -40,6 +90,10 @@ namespace CodexUsageOverlay
         public int CustomBackgroundArgb = Color.FromArgb(24, 99, 171).ToArgb();
         public int RefreshSeconds = 15;
         public OverlayPlacement Placement = OverlayPlacement.TitleBar;
+        public string UiTheme = "Auto";
+        public bool ShowPlanPill = true;
+        public bool ShowTokenPill = true;
+        public bool ShowResetCreditsPill = true;
         public bool ResetNotificationsEnabled;
         public bool OnboardingCompleted;
         public int OnboardingVersion;
@@ -91,6 +145,10 @@ namespace CodexUsageOverlay
                         Enum.TryParse(value, true, out placement) &&
                         Enum.IsDefined(typeof(OverlayPlacement), placement))
                         settings.Placement = placement;
+                    else if (key == "UiTheme" && (value == "Auto" || value == "Light" || value == "Dark")) settings.UiTheme = value;
+                    else if (key == "ShowPlanPill" && Boolean.TryParse(value, out enabled)) settings.ShowPlanPill = enabled;
+                    else if (key == "ShowTokenPill" && Boolean.TryParse(value, out enabled)) settings.ShowTokenPill = enabled;
+                    else if (key == "ShowResetCreditsPill" && Boolean.TryParse(value, out enabled)) settings.ShowResetCreditsPill = enabled;
                     else if (key == "ResetNotificationsEnabled" && Boolean.TryParse(value, out enabled)) settings.ResetNotificationsEnabled = enabled;
                     else if (key == "OnboardingVersion" && Int32.TryParse(value, out number)) settings.OnboardingVersion = Math.Max(0, number);
                     else if (key == "OnboardingCompleted" && Boolean.TryParse(value, out enabled))
@@ -181,6 +239,10 @@ namespace CodexUsageOverlay
                     "CustomBackgroundArgb=" + settings.CustomBackgroundArgb.ToString(CultureInfo.InvariantCulture),
                     "RefreshSeconds=" + settings.RefreshSeconds.ToString(CultureInfo.InvariantCulture),
                     "Placement=" + settings.Placement.ToString(),
+                    "UiTheme=" + settings.UiTheme,
+                    "ShowPlanPill=" + settings.ShowPlanPill.ToString(CultureInfo.InvariantCulture),
+                    "ShowTokenPill=" + settings.ShowTokenPill.ToString(CultureInfo.InvariantCulture),
+                    "ShowResetCreditsPill=" + settings.ShowResetCreditsPill.ToString(CultureInfo.InvariantCulture),
                     "ResetNotificationsEnabled=" + settings.ResetNotificationsEnabled.ToString(CultureInfo.InvariantCulture),
                     "OnboardingCompleted=" + settings.OnboardingCompleted.ToString(CultureInfo.InvariantCulture),
                     "OnboardingVersion=" + settings.OnboardingVersion.ToString(CultureInfo.InvariantCulture)

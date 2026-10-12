@@ -24,12 +24,30 @@ namespace CodexUsageOverlay
         public string Text;
         public Color DotColor;
         public Rectangle Bounds;
+        public Rectangle RingBounds;
+        public Rectangle LabelBounds;
+        public int? Remaining;
     }
 
     internal sealed class ComposerUsagePillLayout
     {
         public readonly List<ComposerUsagePill> Pills = new List<ComposerUsagePill>();
         public Rectangle RefreshBounds = Rectangle.Empty;
+        internal bool SidebarRings;
+        internal const int SidebarWidth = 40;
+        internal const int SidebarHeight = 120;
+
+        internal static ComposerUsagePillKind MenuKind(OverlayPlacement placement)
+        {
+            return ComposerUsagePillKind.ShortQuota;
+        }
+
+        internal static bool ShowsTooltip(OverlayPlacement placement, ComposerUsagePillKind kind, bool menuOpen = false)
+        {
+            if (menuOpen) return false;
+            return placement == OverlayPlacement.Sidebar ? kind == ComposerUsagePillKind.WeeklyQuota :
+                ComposerUsagePillTooltips.IsInteractive(kind);
+        }
 
         public ComposerUsagePill HitTest(Point location)
         {
@@ -58,9 +76,9 @@ namespace CodexUsageOverlay
             return null;
         }
 
-        public static int MeasureWidth(UsageData usage, Graphics graphics, Font font)
+        public static int MeasureWidth(UsageData usage, Graphics graphics, Font font, OverlaySettings settings = null)
         {
-            List<ComposerUsagePill> pills = BuildPills(usage);
+            List<ComposerUsagePill> pills = BuildPills(usage, settings);
             int width = 0;
             foreach (ComposerUsagePill pill in pills)
                 width += MeasurePillWidth(pill.Text, graphics, font);
@@ -73,21 +91,23 @@ namespace CodexUsageOverlay
             UsageData usage,
             Graphics graphics,
             Font font,
-            int canvasWidth)
+            int canvasWidth, OverlaySettings settings = null)
         {
             ComposerUsagePillLayout layout = new ComposerUsagePillLayout();
-            List<ComposerUsagePill> candidates = BuildPills(usage);
+            List<ComposerUsagePill> candidates = BuildPills(usage, settings);
             int available = Math.Max(80, canvasWidth - 4);
 
-            // Token and reset-credit pills are useful details, but the two quota
-            // windows and plan remain visible first when the Codex window is narrow.
+            // Never trim the 5h menu entry, even while data is unavailable.
             while (candidates.Count > 1 && MeasureCandidates(candidates, graphics, font) > available)
             {
-                int optional = FindOptionalPill(candidates, "Token ");
+                int optional = FindOptionalPill(candidates, ComposerUsagePillKind.Tokens);
                 if (optional < 0)
-                    optional = FindOptionalPill(candidates, "券 ");
+                    optional = FindOptionalPill(candidates, ComposerUsagePillKind.ResetCredits);
                 if (optional < 0)
-                    optional = candidates.Count - 1;
+                    optional = FindOptionalPill(candidates, ComposerUsagePillKind.Plan);
+                if (optional < 0)
+                    optional = FindOptionalPill(candidates, ComposerUsagePillKind.WeeklyQuota);
+                if (optional < 0) break;
                 candidates.RemoveAt(optional);
             }
 
@@ -103,6 +123,31 @@ namespace CodexUsageOverlay
             return layout;
         }
 
+        internal static ComposerUsagePillLayout CreateSidebar(UsageData usage, Graphics graphics,
+            Font font, int canvasWidth)
+        {
+            ComposerUsagePillLayout layout = new ComposerUsagePillLayout { SidebarRings = true };
+            usage = usage ?? new UsageData();
+            // Both controls remain present while loading: 5h is the only menu
+            // entry in this mode, so missing quota data must not remove it.
+            List<ComposerUsagePill> pills = new List<ComposerUsagePill> {
+                NewPill(ComposerUsagePillKind.ShortQuota, "5h", QuotaColor(usage.ShortRemaining, Color.FromArgb(59, 130, 246))),
+                NewPill(ComposerUsagePillKind.WeeklyQuota, "周", QuotaColor(usage.WeeklyRemaining, Color.FromArgb(16, 185, 129)))
+            };
+            int top = 2;
+            foreach (ComposerUsagePill pill in pills)
+            {
+                pill.Remaining = pill.Kind == ComposerUsagePillKind.ShortQuota ? usage.ShortRemaining :
+                    pill.Kind == ComposerUsagePillKind.WeeklyQuota ? usage.WeeklyRemaining : null;
+                pill.Bounds = new Rectangle((canvasWidth - 36) / 2, top, 36, 52);
+                pill.RingBounds = new Rectangle(pill.Bounds.Location, new Size(36, 36));
+                pill.LabelBounds = new Rectangle(pill.Bounds.Left, top + 38, 36, 14);
+                layout.Pills.Add(pill);
+                top += 60;
+            }
+            return layout;
+        }
+
         public static void Draw(
             Graphics graphics,
             ComposerUsagePillLayout layout,
@@ -111,10 +156,43 @@ namespace CodexUsageOverlay
             bool refreshPressed)
         {
             foreach (ComposerUsagePill pill in layout.Pills)
-                DrawPill(graphics, pill, font);
+                if (layout.SidebarRings) DrawRing(graphics, pill, font);
+                else DrawPill(graphics, pill, font);
+        }
+
+        private static void DrawRing(Graphics graphics, ComposerUsagePill pill, Font font)
+        {
+            Rectangle bounds = pill.RingBounds;
+            using (Brush fill = new SolidBrush(QuotaPillVisuals.Surface)) graphics.FillEllipse(fill, bounds);
+            Rectangle arc = bounds; arc.Inflate(-2, -2);
+            using (Pen track = new Pen(QuotaPillVisuals.Border, 3f)) graphics.DrawEllipse(track, arc);
+            using (Pen accent = new Pen(pill.DotColor, 3f))
+            {
+                accent.StartCap = LineCap.Round; accent.EndCap = LineCap.Round;
+                if (pill.Remaining.HasValue && pill.Remaining.Value > 0)
+                    graphics.DrawArc(accent, arc, -90, Math.Min(100, pill.Remaining.Value) * 3.6f);
+            }
+            using (Brush text = new SolidBrush(QuotaPillVisuals.Text))
+            using (StringFormat format = UiRendering.CreateTextFormat())
+            {
+                format.Alignment = StringAlignment.Center; format.LineAlignment = StringAlignment.Center;
+                using (Font number = UiRendering.CreateTextFont(font.Name, 7.5f, FontStyle.Bold))
+                using (Font label = UiRendering.CreateTextFont(font.Name, 6.75f, FontStyle.Regular))
+                using (Brush muted = new SolidBrush(QuotaPillVisuals.MutedText))
+                {
+                    graphics.DrawString(pill.Remaining.HasValue ? ClampPercent(pill.Remaining).ToString() + "%" : "—",
+                        number, text, bounds, format);
+                    graphics.DrawString(pill.Text, label, muted, pill.LabelBounds, format);
+                }
+            }
         }
 
         public static void ExportPreview(string path)
+        {
+            ExportPreview(path, null, 450);
+        }
+
+        internal static void ExportPreview(string path, OverlaySettings settings, int width)
         {
             UsageData usage = new UsageData
             {
@@ -132,7 +210,7 @@ namespace CodexUsageOverlay
             if (!String.IsNullOrWhiteSpace(directory))
                 Directory.CreateDirectory(directory);
 
-            using (Bitmap bitmap = UiRendering.CreateLayeredBitmap(450, 32))
+            using (Bitmap bitmap = UiRendering.CreateLayeredBitmap(width, 32))
             using (Graphics graphics = Graphics.FromImage(bitmap))
             using (Font font = UiRendering.CreateTextFont(
                 "Microsoft YaHei UI", 8f, FontStyle.Regular))
@@ -140,44 +218,49 @@ namespace CodexUsageOverlay
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                 graphics.Clear(Color.FromArgb(250, 248, 249, 251));
-                ComposerUsagePillLayout layout = Create(usage, graphics, font, bitmap.Width);
+                ComposerUsagePillLayout layout = Create(usage, graphics, font, bitmap.Width, settings);
                 Draw(graphics, layout, font, false, false);
                 bitmap.Save(path, ImageFormat.Png);
             }
         }
 
-        internal static string[] BuildTexts(UsageData usage)
+        internal static string[] BuildTexts(UsageData usage, OverlaySettings settings = null)
         {
-            List<ComposerUsagePill> pills = BuildPills(usage);
+            List<ComposerUsagePill> pills = BuildPills(usage, settings);
             string[] result = new string[pills.Count];
             for (int index = 0; index < pills.Count; index++)
                 result[index] = pills[index].Text;
             return result;
         }
 
-        private static List<ComposerUsagePill> BuildPills(UsageData usage)
+        internal static bool OpensSessionUsage(OverlayPlacement placement, ComposerUsagePillKind kind)
+        {
+            return placement != OverlayPlacement.Sidebar && kind == ComposerUsagePillKind.Tokens;
+        }
+
+        private static List<ComposerUsagePill> BuildPills(UsageData usage, OverlaySettings settings = null)
         {
             List<ComposerUsagePill> result = new List<ComposerUsagePill>();
             if (usage == null)
                 usage = new UsageData();
 
             string plan = String.IsNullOrWhiteSpace(usage.Plan) ? "Codex" : usage.Plan.Trim();
-            result.Add(NewPill(ComposerUsagePillKind.Plan,
-                plan.ToUpperInvariant(), Color.FromArgb(139, 92, 246)));
+            if (settings == null || settings.ShowPlanPill)
+                result.Add(NewPill(ComposerUsagePillKind.Plan,
+                    plan.ToUpperInvariant(), Color.FromArgb(139, 92, 246)));
 
-            if (usage.HasShortRemaining || usage.ShortRemaining.HasValue)
-                result.Add(NewPill(ComposerUsagePillKind.ShortQuota,
-                    "5h " + ClampPercent(usage.ShortRemaining) + "%",
-                    QuotaColor(usage.ShortRemaining, Color.FromArgb(59, 130, 246))));
+            result.Add(NewPill(ComposerUsagePillKind.ShortQuota,
+                "5h " + (usage.ShortRemaining.HasValue ? ClampPercent(usage.ShortRemaining) + "%" : "—"),
+                QuotaColor(usage.ShortRemaining, Color.FromArgb(59, 130, 246))));
             if (usage.HasWeeklyRemaining || usage.WeeklyRemaining.HasValue)
                 result.Add(NewPill(ComposerUsagePillKind.WeeklyQuota,
                     "周 " + ClampPercent(usage.WeeklyRemaining) + "%",
                     QuotaColor(usage.WeeklyRemaining, Color.FromArgb(16, 185, 129))));
-            if (!String.IsNullOrWhiteSpace(usage.ProfileTokensText) &&
+            if ((settings == null || settings.ShowTokenPill) && !String.IsNullOrWhiteSpace(usage.ProfileTokensText) &&
                 !String.Equals(usage.ProfileTokensText, "待刷新", StringComparison.Ordinal))
                 result.Add(NewPill(ComposerUsagePillKind.Tokens,
                     "Token " + usage.ProfileTokensText.Trim(), Color.FromArgb(245, 158, 11)));
-            if (usage.AvailableResetCredits.HasValue && usage.AvailableResetCredits.Value >= 0)
+            if ((settings == null || settings.ShowResetCreditsPill) && usage.AvailableResetCredits.HasValue && usage.AvailableResetCredits.Value >= 0)
                 result.Add(NewPill(ComposerUsagePillKind.ResetCredits,
                     "券 " + usage.AvailableResetCredits.Value.ToString(CultureInfo.InvariantCulture),
                     Color.FromArgb(236, 72, 153)));
@@ -221,11 +304,11 @@ namespace CodexUsageOverlay
             return Math.Max(44, (int)Math.Ceiling(graphics.MeasureString(text, font).Width) + 26);
         }
 
-        private static int FindOptionalPill(IList<ComposerUsagePill> pills, string prefix)
+        private static int FindOptionalPill(IList<ComposerUsagePill> pills, ComposerUsagePillKind kind)
         {
             for (int index = pills.Count - 1; index >= 0; index--)
             {
-                if (pills[index].Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                if (pills[index].Kind == kind)
                     return index;
             }
             return -1;
@@ -302,7 +385,7 @@ namespace CodexUsageOverlay
             }
         }
 
-        private static GraphicsPath RoundedRectangle(Rectangle rectangle, int radius)
+        internal static GraphicsPath RoundedRectangle(Rectangle rectangle, int radius)
         {
             GraphicsPath path = new GraphicsPath();
             int diameter = Math.Max(2, radius * 2);
@@ -325,6 +408,20 @@ namespace CodexUsageOverlay
         {
             return kind == ComposerUsagePillKind.WeeklyQuota ||
                 kind == ComposerUsagePillKind.ResetCredits;
+        }
+
+        internal static QuotaHoverCardContent BuildSidebarCard(UsageData usage, ResetRadarData radar, DateTimeOffset now)
+        {
+            QuotaHoverCardContent card = BuildCard(usage, radar, now);
+            card.Title = (usage == null || String.IsNullOrWhiteSpace(usage.Plan) ? "Codex" : usage.Plan.Trim().ToUpperInvariant()) + " · 额度与用量";
+            List<string> rows = new List<string> { card.ShortLine, card.WeeklyLine, card.ExtraLine, card.TiboLine };
+            if (usage != null && !String.IsNullOrWhiteSpace(usage.ProfileTokensText))
+            {
+                rows.Add("账户累计 Token  " + usage.ProfileTokensText);
+                rows.Add("账户汇总，非当前会话上下文");
+            }
+            card.DetailLines = rows.ToArray();
+            return card;
         }
 
         internal static QuotaHoverCardContent BuildCreditsCard(UsageData usage)

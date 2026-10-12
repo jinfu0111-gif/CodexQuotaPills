@@ -1,7 +1,8 @@
+param([string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$outputDir = Join-Path $projectRoot 'bin'
+$outputDir = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $projectRoot 'bin' }
 $iconPath = Join-Path $projectRoot 'installer-assets\app-icon.ico'
 $defaultCachePath = Join-Path $projectRoot 'installer-assets\usage-cache.ini'
 $manifestPath = Join-Path $projectRoot 'app.manifest'
@@ -61,9 +62,16 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     (Join-Path $projectRoot 'QuotaHoverCardForm.cs') `
     (Join-Path $projectRoot 'PlacementMenuLayout.cs') `
     (Join-Path $projectRoot 'PopupAnchorPlacement.cs') `
+    (Join-Path $projectRoot 'PopupUiContext.cs') `
+    (Join-Path $projectRoot 'CapsulePromptForm.cs') `
+    (Join-Path $projectRoot 'SidebarWindowProbe.cs') `
+    (Join-Path $projectRoot 'SidebarPreviewExporter.cs') `
     (Join-Path $projectRoot 'PlacementSelectorForm.cs') `
     (Join-Path $projectRoot 'ExitConfirmationForm.cs') `
     (Join-Path $projectRoot 'UsageData.cs') `
+    (Join-Path $projectRoot 'AccountTokenPolicy.cs') `
+    (Join-Path $projectRoot 'SessionUsageReader.cs') `
+    (Join-Path $projectRoot 'SessionUsageForm.cs') `
     (Join-Path $projectRoot 'UsageTrustPolicy.cs') `
     (Join-Path $projectRoot 'GitHubReleaseUpdateService.cs') `
     (Join-Path $projectRoot 'GitHubUpdateInstaller.cs') `

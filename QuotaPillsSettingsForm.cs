@@ -64,14 +64,14 @@ namespace CodexUsageOverlay
             unit.TextAlign = ContentAlignment.MiddleLeft;
             Controls.Add(unit);
 
-            Button save = new Button();
+            Button save = new UpdatePillButton("保存", UpdateMenuVisuals.CreateRainbowPalette(), true);
             save.Text = "保存";
             save.Location = new Point(322, 164);
             save.Size = new Size(84, 30);
             save.Click += SaveAndClose;
             Controls.Add(save);
 
-            Button cancel = new Button();
+            Button cancel = new UpdatePillButton("取消", UpdateMenuVisuals.CreateRainbowPalette(), false);
             cancel.Text = "取消";
             cancel.Location = new Point(228, 164);
             cancel.Size = new Size(84, 30);
@@ -86,8 +86,9 @@ namespace CodexUsageOverlay
                 guideSettings.Theme = "RainbowText";
                 using (FirstRunGuideForm form = new FirstRunGuideForm(guideSettings))
                 {
-                    Rectangle anchor = plusAnchor ?? guide.RectangleToScreen(guide.ClientRectangle);
-                    form.Shown += delegate { form.UpdateAnchor(anchor, Screen.FromRectangle(anchor).WorkingArea); };
+                    Rectangle anchor = PopupUiContext.Anchor.IsEmpty
+                        ? plusAnchor ?? guide.RectangleToScreen(guide.ClientRectangle) : PopupUiContext.Anchor;
+                    form.UpdateAnchor(anchor, Screen.FromRectangle(anchor).WorkingArea);
                     form.ShowDialog(this);
                 }
             };
@@ -101,6 +102,7 @@ namespace CodexUsageOverlay
                 Rectangle anchor = plusAnchor.Value;
                 PositionNearPlus(anchor);
                 Shown += delegate { PositionNearPlus(anchor); };
+                PopupUiContext.Bind(this, anchor);
             }
         }
 

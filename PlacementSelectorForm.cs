@@ -20,6 +20,19 @@ namespace CodexUsageOverlay
         private Rectangle anchorScreenBounds = Rectangle.Empty;
         private DateTime? pointerOutsideSince;
         private float dpiScale = 1f;
+        private bool showPlanPill = true;
+        private bool showTokenPill = true;
+        private bool showResetCreditsPill = true;
+        private bool holdAnchorForDisplayToggle;
+        private Rectangle anchorWindowBounds;
+
+        internal void SetPillVisibility(OverlaySettings settings)
+        {
+            showPlanPill = settings == null || settings.ShowPlanPill;
+            showTokenPill = settings == null || settings.ShowTokenPill;
+            showResetCreditsPill = settings == null || settings.ShowResetCreditsPill;
+            if (IsHandleCreated) RenderLayered();
+        }
 
         public PlacementSelectorForm(
             Action<OverlayPlacement> selectionChanged,
@@ -62,24 +75,21 @@ namespace CodexUsageOverlay
             Rectangle anchorBounds,
             Rectangle workingArea,
             float scale,
-            IntPtr owner)
+            IntPtr owner, OverlaySettings displaySettings = null)
         {
             selectedPlacement = placement;
             anchorScreenBounds = anchorBounds;
+            holdAnchorForDisplayToggle = false;
+            anchorWindowBounds = PopupUiContext.WindowBounds;
+            SetPillVisibility(displaySettings);
             pointerOutsideSince = null;
             dpiScale = Math.Max(0.5f, scale);
 
             int width = Scale(LogicalWidth);
             int height = Scale(LogicalHeight);
-            int left = anchorBounds.Left + (anchorBounds.Width - width) / 2;
-            left = Math.Max(workingArea.Left, Math.Min(left, workingArea.Right - width));
-            int gap = Scale(LogicalGap);
-            int top = anchorBounds.Top - height - gap;
-            if (top < workingArea.Top)
-                top = anchorBounds.Bottom + gap;
-            top = Math.Max(workingArea.Top, Math.Min(top, workingArea.Bottom - height));
-
-            SetBounds(left, top, width, height, BoundsSpecified.All);
+            Point position = PopupAnchorPlacement.NearPlus(anchorBounds,
+                new Size(width, height), workingArea, Scale(LogicalGap), Scale(4));
+            SetBounds(position.X, position.Y, width, height, BoundsSpecified.All);
             if (!Visible)
             {
                 Show();
@@ -94,14 +104,16 @@ namespace CodexUsageOverlay
         public void HideSelector()
         {
             dismissTimer.Stop();
+            holdAnchorForDisplayToggle = false;
             pointerOutsideSince = null;
             if (Visible)
                 Hide();
         }
 
-        internal void ExportPreview(string path, OverlayPlacement placement)
+        internal void ExportPreview(string path, OverlayPlacement placement, OverlaySettings displaySettings = null)
         {
             selectedPlacement = placement;
+            SetPillVisibility(displaySettings);
             dpiScale = 1f;
             Size = new Size(LogicalWidth, LogicalHeight);
             string directory = Path.GetDirectoryName(Path.GetFullPath(path));
@@ -136,7 +148,15 @@ namespace CodexUsageOverlay
             PlacementMenuAction? action = PlacementMenuLayout.HitTestAction(ToLogical(e.Location));
             if (!action.HasValue)
                 return;
-            HideSelector();
+            if (PlacementMenuLayout.IsDisplayToggle(action.Value))
+            {
+                // Resizing the capsule row changes the 5h anchor. Keep this
+                // open menu still while the user changes the two switches.
+                holdAnchorForDisplayToggle = true;
+                anchorWindowBounds = PopupUiContext.WindowBounds;
+                pointerOutsideSince = null;
+            }
+            else HideSelector();
             if (actionSelected != null)
                 actionSelected(action.Value);
         }
@@ -145,10 +165,24 @@ namespace CodexUsageOverlay
         {
             base.OnMouseMove(e);
             Point logical = ToLogical(e.Location);
-            Cursor = PlacementMenuLayout.HitTestPlacement(logical).HasValue ||
-                PlacementMenuLayout.HitTestAction(logical).HasValue
+            Cursor = PlacementMenuLayout.IsClickable(logical)
                 ? Cursors.Hand
                 : Cursors.Default;
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == NativeMethods.WM_SETCURSOR &&
+                (message.LParam.ToInt64() & 0xffff) == NativeMethods.HTCLIENT)
+            {
+                Point logical = ToLogical(PointToClient(Control.MousePosition));
+                // Control.Cursor would synchronously re-enter WM_SETCURSOR.
+                System.Windows.Forms.Cursor.Current =
+                    PlacementMenuLayout.IsClickable(logical) ? Cursors.Hand : Cursors.Default;
+                message.Result = new IntPtr(1);
+                return;
+            }
+            base.WndProc(ref message);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -158,10 +192,32 @@ namespace CodexUsageOverlay
 
         private void CheckPointerLocation(object sender, EventArgs e)
         {
+            if (!PopupUiContext.Anchor.IsEmpty)
+            {
+                if (holdAnchorForDisplayToggle && PopupUiContext.WindowBounds.Size == anchorWindowBounds.Size)
+                {
+                    anchorScreenBounds.Offset(PopupUiContext.WindowBounds.X - anchorWindowBounds.X,
+                        PopupUiContext.WindowBounds.Y - anchorWindowBounds.Y);
+                    anchorWindowBounds = PopupUiContext.WindowBounds;
+                }
+                else
+                {
+                    holdAnchorForDisplayToggle = false;
+                    anchorScreenBounds = PopupUiContext.Anchor;
+                    anchorWindowBounds = PopupUiContext.WindowBounds;
+                }
+                Point position = PopupAnchorPlacement.NearPlus(anchorScreenBounds, Size,
+                    PopupUiContext.WorkingArea, Scale(LogicalGap), Scale(4));
+                if (Location != position) { Location = position; RenderLayered(); }
+            }
             Point pointer = Control.MousePosition;
             Rectangle anchor = anchorScreenBounds;
             anchor.Inflate(Scale(5), Scale(5));
-            if (Bounds.Contains(pointer) || anchor.Contains(pointer))
+            Rectangle bridge = Rectangle.FromLTRB(Math.Min(anchor.Right, Left) - Scale(4),
+                anchor.Top - Scale(5), Math.Max(anchor.Right, Left) + Scale(4),
+                anchor.Bottom + Scale(5));
+            if (Bounds.Contains(pointer) || anchor.Contains(pointer) ||
+                (selectedPlacement == OverlayPlacement.Sidebar && bridge.Contains(pointer)))
             {
                 pointerOutsideSince = null;
                 return;
@@ -199,8 +255,8 @@ namespace CodexUsageOverlay
                 using (Brush shadow = new SolidBrush(Color.FromArgb(28, 15, 23, 42)))
                     graphics.FillPath(shadow, shadowPath);
                 using (GraphicsPath cardPath = RoundedRectangle(card, 13))
-                using (Brush surface = new SolidBrush(Color.FromArgb(250, 250, 250, 251)))
-                using (Pen border = new Pen(Color.FromArgb(72, 148, 163, 184), 1f))
+                using (Brush surface = new SolidBrush(QuotaPillVisuals.CardSurface))
+                using (Pen border = new Pen(QuotaPillVisuals.Border, 1f))
                 {
                     graphics.FillPath(surface, cardPath);
                     graphics.DrawPath(border, cardPath);
@@ -208,7 +264,7 @@ namespace CodexUsageOverlay
 
                 using (Font titleFont = UiRendering.CreateTextFont(
                     "Microsoft YaHei UI", 7.6f, FontStyle.Bold))
-                using (Brush titleBrush = new SolidBrush(Color.FromArgb(35, 39, 47)))
+                using (Brush titleBrush = new SolidBrush(QuotaPillVisuals.Text))
                 using (StringFormat labelFormat = new StringFormat
                 {
                     Alignment = StringAlignment.Near,
@@ -219,18 +275,24 @@ namespace CodexUsageOverlay
                     graphics.DrawString("额度胶囊 · v" + GitHubReleaseUpdateService.CurrentVersion, titleFont, titleBrush,
                         new Rectangle(12, 8, 174, 30), labelFormat);
                     graphics.DrawString("显示位置", titleFont, titleBrush,
-                        new Rectangle(12, 48, 55, 30), labelFormat);
+                        new Rectangle(12, 66, 55, 30), labelFormat);
                     graphics.DrawString("常用功能", titleFont, titleBrush,
-                        new Rectangle(12, 88, 55, 30), labelFormat);
-                    graphics.DrawString("任务续跑", titleFont, titleBrush,
                         new Rectangle(12, 128, 55, 30), labelFormat);
+                    graphics.DrawString("外观主题", titleFont, titleBrush,
+                        new Rectangle(12, 168, 55, 30), labelFormat);
+                    graphics.DrawString("胶囊显示", titleFont, titleBrush,
+                        new Rectangle(12, 208, 55, 30), labelFormat);
+                    graphics.DrawString("任务续跑", titleFont, titleBrush,
+                        new Rectangle(12, 288, 55, 30), labelFormat);
+                    graphics.DrawString("会话数据", titleFont, titleBrush,
+                        new Rectangle(12, 248, 55, 30), labelFormat);
                 }
                 using (Pen divider = new Pen(Color.FromArgb(42, 148, 163, 184), 1f))
                 {
                     graphics.DrawLine(divider, 12, 43, LogicalWidth - 12, 43);
-                    graphics.DrawLine(divider, 12, 83, LogicalWidth - 12, 83);
+                    graphics.DrawLine(divider, 12, 121, LogicalWidth - 12, 121);
                 }
-                DrawAction(graphics, PlacementMenuAction.CheckGitHubUpdate, "检查 GitHub 更新",
+                DrawAction(graphics, PlacementMenuAction.CheckGitHubUpdate, "检查更新",
                     Color.FromArgb(59, 130, 246), false);
 
                 DrawChoice(graphics, OverlayPlacement.TitleBar, "上 · 标题栏",
@@ -239,6 +301,11 @@ namespace CodexUsageOverlay
                     Color.FromArgb(59, 130, 246));
                 DrawChoice(graphics, OverlayPlacement.ComposerBottom, "下 · 输入框",
                     Color.FromArgb(16, 185, 129));
+                DrawChoice(graphics, OverlayPlacement.Sidebar, "侧 · 侧边栏",
+                    Color.FromArgb(236, 72, 153));
+                DrawAction(graphics, PlacementMenuAction.ThemeAuto, "跟随系统", Color.FromArgb(139, 92, 246), false);
+                DrawAction(graphics, PlacementMenuAction.ThemeLight, "浅色", Color.FromArgb(59, 130, 246), false);
+                DrawAction(graphics, PlacementMenuAction.ThemeDark, "深色", Color.FromArgb(100, 116, 139), false);
                 DrawAction(graphics, PlacementMenuAction.UpdateCodex, "更新 Codex",
                     Color.FromArgb(234, 146, 31), false);
                 DrawAction(graphics, PlacementMenuAction.RefreshInterval, "刷新间隔",
@@ -247,6 +314,14 @@ namespace CodexUsageOverlay
                     Color.FromArgb(219, 61, 94), true);
                 DrawAction(graphics, PlacementMenuAction.AutoResume, "额度恢复后自动续跑",
                     Color.FromArgb(16, 185, 129), false);
+                DrawAction(graphics, PlacementMenuAction.SessionUsage, "会话用量 · 缓存与上下文",
+                    Color.FromArgb(245, 158, 11), false);
+                DrawAction(graphics, PlacementMenuAction.TogglePlan, "套餐 " + (showPlanPill ? "显示" : "隐藏"),
+                    showPlanPill ? Color.FromArgb(139, 92, 246) : QuotaPillVisuals.MutedText, false);
+                DrawAction(graphics, PlacementMenuAction.ToggleTokens, "Token " + (showTokenPill ? "显示" : "隐藏"),
+                    showTokenPill ? Color.FromArgb(245, 158, 11) : QuotaPillVisuals.MutedText, false);
+                DrawAction(graphics, PlacementMenuAction.ToggleResetCredits, "券 " + (showResetCreditsPill ? "显示" : "隐藏"),
+                    showResetCreditsPill ? Color.FromArgb(236, 72, 153) : QuotaPillVisuals.MutedText, false);
             }
             return bitmap;
         }
@@ -269,7 +344,13 @@ namespace CodexUsageOverlay
             Color accent,
             bool danger)
         {
-            DrawPill(graphics, PlacementMenuLayout.ActionBounds(action), text, accent, false, danger);
+            bool selected = action == PlacementMenuAction.ThemeAuto && PopupUiContext.Theme == "Auto" ||
+                action == PlacementMenuAction.ThemeLight && PopupUiContext.Theme == "Light" ||
+                action == PlacementMenuAction.ThemeDark && PopupUiContext.Theme == "Dark" ||
+                action == PlacementMenuAction.TogglePlan && showPlanPill ||
+                action == PlacementMenuAction.ToggleTokens && showTokenPill ||
+                action == PlacementMenuAction.ToggleResetCredits && showResetCreditsPill;
+            DrawPill(graphics, PlacementMenuLayout.ActionBounds(action), text, accent, selected, danger);
         }
 
         private static void DrawPill(
@@ -281,12 +362,12 @@ namespace CodexUsageOverlay
             bool danger)
         {
             Color fillColor = selected
-                ? Color.FromArgb(255, 242, 238, 255)
-                : Color.FromArgb(244, 255, 255, 255);
+                ? (PopupUiContext.Dark ? Color.FromArgb(55, 44, 78) : Color.FromArgb(255, 242, 238, 255))
+                : QuotaPillVisuals.Surface;
             Color borderColor = selected
                 ? Color.FromArgb(165, accent)
-                : Color.FromArgb(58, 100, 116, 139);
-            using (GraphicsPath path = RoundedRectangle(bounds, 10))
+                : QuotaPillVisuals.Border;
+            using (GraphicsPath path = RoundedRectangle(bounds, 15))
             using (Brush fill = new SolidBrush(fillColor))
             using (Pen border = new Pen(borderColor, selected ? 1.25f : 1f))
             {
@@ -301,8 +382,8 @@ namespace CodexUsageOverlay
                 "Microsoft YaHei UI", 7.5f,
                 selected ? FontStyle.Bold : FontStyle.Regular))
             using (Brush textBrush = new SolidBrush(danger
-                ? Color.FromArgb(176, 38, 68)
-                : Color.FromArgb(54, 60, 70)))
+                ? UpdateMenuVisuals.CreateRainbowPalette().Danger
+                : QuotaPillVisuals.Text))
             using (StringFormat format = new StringFormat
             {
                 Alignment = StringAlignment.Near,

@@ -70,14 +70,9 @@ namespace CodexUsageOverlay
             logicalHeight = MeasureContentHeight(content);
             int width = Math.Max(1, (int)Math.Round(logicalWidth * dpiScale));
             int height = Math.Max(1, (int)Math.Round(logicalHeight * dpiScale));
-            int left = anchorScreenBounds.Left + (anchorScreenBounds.Width - width) / 2;
-            left = Math.Max(workingArea.Left, Math.Min(left, workingArea.Right - width));
-            int top = anchorScreenBounds.Top - height -
-                Math.Max(1, (int)Math.Round(LogicalGap * dpiScale));
-            if (top < workingArea.Top)
-                top = anchorScreenBounds.Bottom + Math.Max(1, (int)Math.Round(LogicalGap * dpiScale));
-            top = Math.Max(workingArea.Top, Math.Min(top, workingArea.Bottom - height));
-            Rectangle bounds = new Rectangle(left, top, width, height);
+            Point position = PopupAnchorPlacement.NearPlus(anchorScreenBounds,
+                new Size(width, height), workingArea, Math.Max(1, (int)Math.Round(LogicalGap * dpiScale)));
+            Rectangle bounds = new Rectangle(position, new Size(width, height));
             bool boundsChanged = bounds != renderedBounds;
             if (boundsChanged)
             {
@@ -94,7 +89,7 @@ namespace CodexUsageOverlay
                 NativeMethods.ShowWindow(Handle, NativeMethods.SW_SHOWNOACTIVATE);
             }
 
-            string revision = content.RevisionKey + "|" + dpiScale.ToString("0.###");
+            string revision = content.RevisionKey + "|" + dpiScale.ToString("0.###") + "|" + PopupUiContext.ThemeRevision;
             if (becameVisible || boundsChanged ||
                 !String.Equals(revision, renderedRevision, StringComparison.Ordinal))
             {
@@ -163,8 +158,8 @@ namespace CodexUsageOverlay
                 using (Brush shadow = new SolidBrush(Color.FromArgb(28, 15, 23, 42)))
                     graphics.FillPath(shadow, shadowPath);
                 using (GraphicsPath cardPath = RoundedRectangle(card, 13))
-                using (Brush surface = new SolidBrush(Color.FromArgb(250, 250, 250, 251)))
-                using (Pen border = new Pen(Color.FromArgb(72, 148, 163, 184), 1f))
+                using (Brush surface = new SolidBrush(QuotaPillVisuals.CardSurface))
+                using (Pen border = new Pen(QuotaPillVisuals.Border, 1f))
                 {
                     graphics.FillPath(surface, cardPath);
                     graphics.DrawPath(border, cardPath);
@@ -174,8 +169,8 @@ namespace CodexUsageOverlay
                     "Microsoft YaHei UI", 8.5f, FontStyle.Bold))
                 using (Font rowFont = UiRendering.CreateTextFont(
                     "Microsoft YaHei UI", 8.2f, FontStyle.Regular))
-                using (Brush titleBrush = new SolidBrush(Color.FromArgb(255, 31, 41, 55)))
-                using (Brush rowBrush = new SolidBrush(Color.FromArgb(255, 75, 85, 99)))
+                using (Brush titleBrush = new SolidBrush(QuotaPillVisuals.Text))
+                using (Brush rowBrush = new SolidBrush(QuotaPillVisuals.MutedText))
                 using (Pen divider = new Pen(Color.FromArgb(55, 148, 163, 184), 1f))
                 using (StringFormat format = UiRendering.CreateTextFormat())
                 {
@@ -191,7 +186,7 @@ namespace CodexUsageOverlay
                     {
                         for (int index = 0; index < content.DetailLines.Length; index++)
                             DrawRow(graphics, content.DetailLines[index], 43 + 23 * index,
-                                index == content.DetailLines.Length - 1
+                                content.Title.EndsWith("额度与用量", StringComparison.Ordinal) ? SidebarRowColor(index) : index == content.DetailLines.Length - 1
                                     ? QuotaPillVisuals.MutedText : Color.FromArgb(236, 72, 153),
                                 rowFont, rowBrush, format, logicalWidth);
                     }
@@ -212,6 +207,13 @@ namespace CodexUsageOverlay
                 }
             }
             return bitmap;
+        }
+
+        private static Color SidebarRowColor(int row)
+        {
+            return row == 0 ? Color.FromArgb(59, 130, 246) : row == 1 ? Color.FromArgb(16, 185, 129) :
+                row == 2 ? Color.FromArgb(236, 72, 153) : row == 3 ? Color.FromArgb(139, 92, 246) :
+                row == 4 ? Color.FromArgb(245, 158, 11) : QuotaPillVisuals.MutedText;
         }
 
         private static void DrawRow(

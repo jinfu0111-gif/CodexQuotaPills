@@ -16,13 +16,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run tests
-        shell: pwsh
-        run: .\test.ps1
-
       - name: Build executable
         shell: pwsh
         run: .\build.ps1
+
+      - name: Run tests including cursor message assembly regressions
+        shell: pwsh
+        run: .\test.ps1 -Executable .\bin\CodexQuotaPills.exe
 
       - name: Verify installation boundaries and repeat installs
         shell: pwsh
