@@ -6,12 +6,12 @@ namespace CodexUsageOverlay
 {
     internal static class SidebarLayoutTests
     {
-        internal static void FourPositionsAndThemesRoundTrip()
+        internal static void ThreePositionsAndThemesRoundTrip()
         {
             string path = Path.Combine(Path.GetTempPath(), "pills-sidebar-" + Guid.NewGuid().ToString("N") + ".ini");
             try
             {
-                foreach (OverlayPlacement placement in Enum.GetValues(typeof(OverlayPlacement)))
+                foreach (OverlayPlacement placement in new[] { OverlayPlacement.TitleBar, OverlayPlacement.ComposerBottom, OverlayPlacement.Sidebar })
                     foreach (string theme in new[] { "Auto", "Light", "Dark" })
                     {
                         Assert(OverlaySettingsStore.SaveToPath(new OverlaySettings { Placement = placement, UiTheme = theme }, path), "save failed");
@@ -114,13 +114,9 @@ namespace CodexUsageOverlay
                 Assert(Math.Abs(top.Top + top.Height / 2 - window.Top - p(22)) <= 1, "title bar not vertically centered");
                 Assert(Math.Abs(top.Left + top.Width / 2 - (window.Left + p(320) + window.Right - p(138)) / 2) <= 1, "title bar not centered in free menu area");
                 Rectangle middle = OverlayPlacementLayout.CalculateBounds(OverlayPlacement.ContentTop, window, area, size, scale, Rectangle.Empty);
-                Assert(Math.Abs(middle.Top + middle.Height / 2 - window.Top - p(70)) <= 1, "header not vertically centered");
-                Assert(Math.Abs(middle.Left + middle.Width / 2 - (window.Left + p(290) + window.Right) / 2) <= 1, "header not horizontally centered");
+                Assert(middle == top, "legacy window-top placement did not resolve to title bar");
                 Rectangle bottom = OverlayPlacementLayout.CalculateBounds(OverlayPlacement.ComposerBottom, window, area, size, scale, Rectangle.Empty);
-                int composerLeft = window.Left + p(290) + (window.Width - p(290) - p(736)) / 2;
-                Assert(bottom.Left == composerLeft + p(130), "composer is not left aligned after approval");
-                Assert(Math.Abs(bottom.Top + bottom.Height / 2 - window.Bottom + p(42)) <= 1, "composer row not centered");
-                Assert(bottom.Right <= composerLeft + p(736) - p(184), "composer covers model / send controls");
+                Assert(bottom.IsEmpty, "window-only geometry must not invent a composer host");
             }
             Rectangle realHost = new Rectangle(-1700, 380, 400, 32);
             Rectangle usable = new Rectangle(-2400, 0, 1920, 1080);
@@ -201,6 +197,56 @@ namespace CodexUsageOverlay
             Assert(!PopupUiContext.ShouldDisplay(true, true, false, true, true, true), "popup remained over minimized app");
             Assert(!PopupUiContext.ShouldDisplay(true, false, true, false, true, false), "popup stayed after sidebar collapse");
             Assert(!PopupUiContext.ShouldDisplay(false, false, false, true, false, true), "popup stayed after app disappeared");
+        }
+
+        internal static void CapsuleAppScopeAndWindowOrder()
+        {
+            Assert(OverlayWindowPresentation.ShouldDisplayCapsule(true,false), "visible background ChatGPT lost its capsule");
+            Assert(!OverlayWindowPresentation.ShouldDisplayCapsule(true,true), "minimized ChatGPT kept its capsule");
+            Assert(!OverlayWindowPresentation.ShouldDisplayCapsule(false,false), "closed or hidden ChatGPT kept its capsule");
+            IntPtr app=new IntPtr(10), capsule=new IntPtr(20), upper=new IntPtr(30), lower=new IntPtr(40), top=new IntPtr(50);
+            Assert(OverlayWindowPresentation.FindInsertion(new[] {upper,lower,app},app,capsule,false,h=>false)==lower,
+                "capsule jumps over unrelated windows above ChatGPT");
+            Assert(OverlayWindowPresentation.FindInsertion(new[] {upper,capsule,lower,app},app,capsule,false,h=>false)==lower,
+                "capsule's previous position interferes with attachment");
+            Assert(OverlayWindowPresentation.FindInsertion(new[] {top,app},app,capsule,false,h=>h==top)==IntPtr.Zero,
+                "ordinary ChatGPT promoted capsule into global topmost band");
+            Assert(OverlayWindowPresentation.FindInsertion(new[] {top,app},app,capsule,true,h=>h==top)==top,
+                "explicitly topmost ChatGPT lost its relative layer");
+            Assert(OverlayWindowPresentation.FindInsertion(new[] {upper,lower},app,capsule,false,h=>false)==capsule,
+                "missing ChatGPT rearranged the desktop");
+        }
+
+        internal static void ActualAssemblyKeepsCapsuleInAppScope(System.Reflection.Assembly assembly)
+        {
+            Type presentation=assembly.GetType("CodexUsageOverlay.OverlayWindowPresentation",true);
+            var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic;
+            var display=presentation.GetMethod("ShouldDisplayCapsule",flags);
+            var insertion=presentation.GetMethod("FindInsertion",flags);
+            Assert(display!=null && insertion!=null, "production still uses foreground-only hiding and global topmost");
+            Assert((bool)display.Invoke(null,new object[]{true,false}), "background visible app failed production scope check");
+            IntPtr app=new IntPtr(10), capsule=new IntPtr(20), upper=new IntPtr(30);
+            Assert((IntPtr)insertion.Invoke(null,new object[]{new[]{upper,app},app,capsule,false,new Func<IntPtr,bool>(h=>false)})==upper,
+                "production raises capsule over another application");
+            var adjacent=presentation.GetMethod("FindInsertionFromPrevious",flags);
+            Assert(adjacent!=null,"production still derives z-order from EnumWindows inventory");
+            IntPtr actualPredecessor=new IntPtr(2295474);
+            Assert((IntPtr)adjacent.Invoke(null,new object[]{actualPredecessor,capsule,false,false})==actualPredecessor,
+                "production ignored captured actual predecessor absent from enumeration");
+        }
+
+        internal static void ActualPredecessorOverridesMisleadingEnumeration()
+        {
+            IntPtr app=new IntPtr(527642), capsule=new IntPtr(1770196), enumeratedPrevious=new IntPtr(199430),
+                actualPrevious=new IntPtr(2295474);
+            Assert(OverlayWindowPresentation.FindInsertion(new[]{enumeratedPrevious,capsule,app},app,capsule,false,h=>false)==enumeratedPrevious,
+                "captured wrong enumeration fixture lost the original failure");
+            Assert(OverlayWindowPresentation.FindInsertionFromPrevious(actualPrevious,capsule,false,false)==actualPrevious,
+                "real predecessor was replaced by inventory order");
+            Assert(OverlayWindowPresentation.FindInsertionFromPrevious(capsule,capsule,false,false)==capsule,
+                "already attached capsule was rearranged unnecessarily");
+            Assert(OverlayWindowPresentation.FindInsertionFromPrevious(actualPrevious,capsule,false,true)==IntPtr.Zero,
+                "non-topmost capsule was promoted into a topmost band");
         }
 
         private static void Assert(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

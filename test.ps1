@@ -5,6 +5,7 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outputDir = Join-Path $projectRoot 'tests\bin'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $frameworkDir = Split-Path -Parent $compiler
+$uiaDir = Join-Path $frameworkDir 'WPF'
 $winMetadataDir = Join-Path $env:WINDIR 'System32\WinMetadata'
 
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
@@ -18,6 +19,9 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     /reference:System.Drawing.dll `
     /reference:System.Web.Extensions.dll `
     /reference:System.Windows.Forms.dll `
+    "/reference:$uiaDir\UIAutomationClient.dll" `
+    "/reference:$uiaDir\UIAutomationTypes.dll" `
+    "/reference:$uiaDir\WindowsBase.dll" `
     /reference:System.Xml.dll `
     /reference:System.Xml.Linq.dll `
     "/reference:$frameworkDir\System.Runtime.dll" `
@@ -32,6 +36,8 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     (Join-Path $projectRoot 'UpdateMenuVisuals.cs') `
     (Join-Path $projectRoot 'OverlayInteraction.cs') `
     (Join-Path $projectRoot 'ComposerUsagePills.cs') `
+    (Join-Path $projectRoot 'ComposerWindowProbe.cs') `
+    (Join-Path $projectRoot 'tests\ComposerPlacementTests.cs') `
     (Join-Path $projectRoot 'PlacementMenuLayout.cs') `
     (Join-Path $projectRoot 'PopupAnchorPlacement.cs') `
     (Join-Path $projectRoot 'PopupUiContext.cs') `
@@ -98,4 +104,6 @@ if ($Executable) {
     $taskExecutable = (Resolve-Path -LiteralPath $Executable).Path
     & (Join-Path $outputDir 'ResetRadarTests.exe') ("--cursor-message-assembly=" + $taskExecutable)
     if ($LASTEXITCODE -ne 0) { throw "Cursor message regression failed with exit code $LASTEXITCODE" }
+    & (Join-Path $outputDir 'ResetRadarTests.exe') ("--composer-placement-assembly=" + $taskExecutable)
+    if ($LASTEXITCODE -ne 0) { throw "Composer placement regression failed with exit code $LASTEXITCODE" }
 }

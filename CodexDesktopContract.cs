@@ -44,7 +44,7 @@ namespace CodexUsageOverlay
                 object build = Child(Child(Child(root, ".vite"), "build"), null);
                 IDictionary<string, object> files = ResumeJson.Map(ResumeJson.Get(build, "files"));
                 if (files == null) throw new IOException("Codex 资源布局未适配");
-                string declarations = null, implementation = null;
+                StringBuilder contractSource = new StringBuilder();
                 int count = 0;
                 foreach (KeyValuePair<string, object> entry in files)
                 {
@@ -59,10 +59,13 @@ namespace CodexUsageOverlay
                         throw new IOException("Codex 合约资源位置无效");
                     file.Position = 8L + headerSize + offset;
                     string source = Encoding.UTF8.GetString(ReadExactly(reader, (int)size));
-                    if (entry.Key.StartsWith("src-", StringComparison.Ordinal)) declarations = (declarations ?? "") + source;
-                    else implementation = (implementation ?? "") + source;
+                    // Newer official builds move follower handlers from bootstrap
+                    // into src chunks. Verify the same contract across all bounded
+                    // eligible chunks, including conflicting version declarations.
+                    contractSource.Append(source).Append('\n');
                 }
-                if (declarations == null || implementation == null || !Matches(declarations, implementation))
+                string contract = contractSource.ToString();
+                if (!Matches(contract, contract))
                     throw new IOException("Codex IPC 合约已改变，需适配后续跑（最近验证 " + CodexDesktopResumeClient.VerifiedPackageVersion + "）");
             }
         }

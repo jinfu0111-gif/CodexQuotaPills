@@ -20,7 +20,7 @@ namespace CodexUsageOverlay
 
     internal sealed class CodexDesktopResumeClient : IResumeDesktop
     {
-        internal const string VerifiedPackageVersion = "26.930.7945.0";
+        internal const string VerifiedPackageVersion = "26.1013.3656.0";
         private const int Timeout = 5000;
         private readonly NamedPipeClientStream pipe;
         private readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024, RecursionLimit = 300 };

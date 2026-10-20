@@ -219,14 +219,18 @@ function Get-InstallShortcut([string]$Path) {
     return [pscustomobject]@{ TargetPath=$fields[0]; Arguments=$fields[1]; WorkingDirectory=$fields[2] }
 }
 
-function Save-InstallShortcut([string]$Path, [string]$Exe) {
+function Save-InstallShortcut([string]$Path, [string]$Exe, [string]$BackupDirectory) {
     $null = Assert-InstallPath $Path
     Initialize-InstallShortcuts
     if (Test-Path -LiteralPath $Path) {
         $old = Get-InstallShortcut $Path
         if ([IO.Path]::GetFileName($old.TargetPath) -ine 'CodexQuotaPills.exe') { throw 'Shortcut name is already used by another program.' }
         if ($old.TargetPath -eq $Exe -and -not $old.Arguments) { return }
-        Copy-Item -LiteralPath $Path -Destination ($Path + '.' + [guid]::NewGuid().ToString('N') + '.bak')
+        if (-not $BackupDirectory) { $BackupDirectory = Join-Path $env:LOCALAPPDATA 'CodexQuotaPills\ShortcutBackups' }
+        $BackupDirectory = Assert-InstallPath $BackupDirectory
+        New-Item -ItemType Directory -Path $BackupDirectory -Force | Out-Null
+        $backupName = [IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.bak'
+        Copy-Item -LiteralPath $Path -Destination (Join-Path $BackupDirectory $backupName)
     }
     New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
     [QuotaInstall.Shortcuts]::Save($Path, $Exe)

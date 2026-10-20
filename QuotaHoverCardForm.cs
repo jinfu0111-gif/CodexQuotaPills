@@ -28,7 +28,7 @@ namespace CodexUsageOverlay
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            TopMost = true;
+            TopMost = false;
             Width = DefaultLogicalWidth;
             Height = LogicalHeight;
         }
@@ -71,7 +71,8 @@ namespace CodexUsageOverlay
             int width = Math.Max(1, (int)Math.Round(logicalWidth * dpiScale));
             int height = Math.Max(1, (int)Math.Round(logicalHeight * dpiScale));
             Point position = PopupAnchorPlacement.NearPlus(anchorScreenBounds,
-                new Size(width, height), workingArea, Math.Max(1, (int)Math.Round(LogicalGap * dpiScale)));
+                new Size(width, height), workingArea, PopupUiContext.CapsuleGap(
+                    Math.Max(1, (int)Math.Round(LogicalGap * dpiScale)), dpiScale));
             Rectangle bounds = new Rectangle(position, new Size(width, height));
             bool boundsChanged = bounds != renderedBounds;
             if (boundsChanged)

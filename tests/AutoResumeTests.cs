@@ -235,13 +235,15 @@ namespace CodexUsageOverlay
             {
                 string declarations = "\"thread-stream-state-changed\":11,\"thread-stream-following-changed\":1,\"thread-owner-discovery\":1,\"thread-follower-start-turn\":2,\"thread-archived\":2,\"thread-queued-followups-changed\":2";
                 string implementation = "case`thread-follower-start-turn`: e.startTurn(t.params.conversationId,t.params.turnStart); inheritThreadSettings: true; supportsUntrustedAppInput:!0";
-                byte[] first = Encoding.UTF8.GetBytes(declarations), second = Encoding.UTF8.GetBytes(implementation);
-                object firstEntry = Obj("offset", "0", "size", first.Length);
-                object tree = Obj("files", Obj(".vite", Obj("files", Obj("build", Obj("files", Obj(
-                    "src-test.js", firstEntry, "bootstrap-test.js", Obj("offset", first.Length.ToString(), "size", second.Length)))))));
-                for (int scenario = 0; scenario < 3; scenario++)
+                for (int scenario = 0; scenario < 6; scenario++)
                 {
-                    if (scenario == 2) ResumeJson.Map(firstEntry)["offset"] = "-1";
+                    string runtime = scenario == 4 ? implementation + ",\"thread-stream-state-changed\":12" :
+                        scenario == 5 ? implementation.Replace("supportsUntrustedAppInput:!0", "unsupported:!0") : implementation;
+                    byte[] first = Encoding.UTF8.GetBytes(declarations), second = Encoding.UTF8.GetBytes(runtime);
+                    object firstEntry = Obj("offset", scenario == 2 ? "-1" : "0", "size", first.Length);
+                    string runtimeChunk = scenario == 3 ? "src-runtime.js" : "bootstrap-test.js";
+                    object tree = Obj("files", Obj(".vite", Obj("files", Obj("build", Obj("files", Obj(
+                        "src-test.js", firstEntry, runtimeChunk, Obj("offset", first.Length.ToString(), "size", second.Length)))))));
                     byte[] header = Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(tree));
                     using (BinaryWriter writer = new BinaryWriter(File.Create(path)))
                     {
@@ -251,7 +253,7 @@ namespace CodexUsageOverlay
                     }
                     bool rejected = false;
                     try { CodexDesktopContract.ValidateArchive(path); } catch (IOException) { rejected = true; }
-                    Assert(rejected == (scenario != 0), "truncated/out-of-bounds contract not rejected: " + scenario);
+                    Assert(rejected == (scenario != 0 && scenario != 3), "archive layout or contract validation incorrect: " + scenario);
                 }
             }
             finally { if (File.Exists(path)) File.Delete(path); }
@@ -398,6 +400,8 @@ namespace CodexUsageOverlay
                 while (monitor.Scanning && DateTime.UtcNow < deadline) Thread.Sleep(100);
                 Console.WriteLine("ScanStatus=" + monitor.Message);
                 Console.WriteLine("QuotaInterruptedCount=" + monitor.Snapshot().Count);
+                foreach (ResumeCandidate candidate in monitor.Snapshot())
+                    Console.WriteLine("CandidateStatus=" + candidate.Status);
                 Console.WriteLine("AutomaticDispatchEnabled=" + monitor.Enabled);
                 Console.WriteLine("MessagesSent=0");
                 return !monitor.Scanning && monitor.Message.StartsWith("已检查 ", StringComparison.Ordinal) ? 0 : 1;

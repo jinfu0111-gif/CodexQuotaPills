@@ -37,7 +37,7 @@ namespace CodexUsageOverlay
             Text = "会话用量 · 只读";
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = UiRendering.CreateTextFont("Microsoft YaHei UI", 9f, FontStyle.Regular);
-            FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true;
+            FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = false;
             StartPosition = FormStartPosition.Manual; BackColor = palette.Surface;
             ClientSize = new Size(426, 416); DoubleBuffered = true; KeyPreview = true;
             LabelAt("会话用量 · 只读", 18, 14, 342, 27, true);

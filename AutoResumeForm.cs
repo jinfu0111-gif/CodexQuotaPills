@@ -26,7 +26,7 @@ namespace CodexUsageOverlay
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
-            TopMost = true;
+            TopMost = false;
             BackColor = palette.Surface;
             ClientSize = new Size(540, 340);
             DoubleBuffered = true;

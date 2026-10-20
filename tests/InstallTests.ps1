@@ -136,6 +136,14 @@ try {
     $savedShortcut = Get-InstallShortcut $shortcutPath
     Check ($savedShortcut.TargetPath -eq $unicodeTarget) 'Unicode shortcut target incorrect.'
     Check ($savedShortcut.WorkingDirectory -eq $packageFolder -and -not $savedShortcut.Arguments) 'Unicode shortcut working directory or arguments changed.'
+    $backupDirectory = Join-Path $testRoot 'archived-shortcuts'
+    $shortcutHash = (Get-FileHash -LiteralPath $shortcutPath).Hash
+    $nextTarget = Join-Path $testRoot 'next-version\CodexQuotaPills.exe'
+    Save-InstallShortcut $shortcutPath $nextTarget $backupDirectory
+    $backups = @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.bak' -File)
+    Check ($backups.Count -eq 1 -and (Get-FileHash -LiteralPath $backups[0].FullName).Hash -eq $shortcutHash) 'Shortcut update failed to archive the original backup.'
+    Check (@(Get-ChildItem -LiteralPath $testRoot -Filter '*.bak').Count -eq 0) 'Shortcut update left a backup in the active shortcut folder.'
+    Check ((Get-InstallShortcut $shortcutPath).TargetPath -eq $nextTarget) 'Shortcut update failed after archiving.'
     Write-Output "Installation tests passed: $passed"
 } finally {
     # Only delete the newly-created, resolved task directory below system Temp.

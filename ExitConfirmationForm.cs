@@ -16,7 +16,7 @@ namespace CodexUsageOverlay
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            TopMost = true;
+            TopMost = false;
             StartPosition = FormStartPosition.Manual;
             ClientSize = new Size(320, 138);
 

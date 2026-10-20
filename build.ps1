@@ -8,6 +8,7 @@ $defaultCachePath = Join-Path $projectRoot 'installer-assets\usage-cache.ini'
 $manifestPath = Join-Path $projectRoot 'app.manifest'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $frameworkDir = Split-Path -Parent $compiler
+$uiaDir = Join-Path $frameworkDir 'WPF'
 $winMetadataDir = Join-Path $env:WINDIR 'System32\WinMetadata'
 if (-not (Test-Path -LiteralPath $compiler)) {
     throw "Missing .NET Framework compiler: $compiler"
@@ -45,6 +46,9 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     /reference:System.Drawing.dll `
     /reference:System.Web.Extensions.dll `
     /reference:System.Windows.Forms.dll `
+    "/reference:$uiaDir\UIAutomationClient.dll" `
+    "/reference:$uiaDir\UIAutomationTypes.dll" `
+    "/reference:$uiaDir\WindowsBase.dll" `
     /reference:System.Xml.dll `
     /reference:System.Xml.Linq.dll `
     "/reference:$frameworkDir\System.Runtime.dll" `
@@ -59,6 +63,7 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     (Join-Path $projectRoot 'UpdateMenuVisuals.cs') `
     (Join-Path $projectRoot 'OverlayInteraction.cs') `
     (Join-Path $projectRoot 'ComposerUsagePills.cs') `
+    (Join-Path $projectRoot 'ComposerWindowProbe.cs') `
     (Join-Path $projectRoot 'QuotaHoverCardForm.cs') `
     (Join-Path $projectRoot 'PlacementMenuLayout.cs') `
     (Join-Path $projectRoot 'PopupAnchorPlacement.cs') `

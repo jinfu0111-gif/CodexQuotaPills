@@ -1,6 +1,6 @@
 # 从链接安装 Codex Quota Pills
 
-当前正式版为 **0.2.33**。普通用户使用安装脚本或正式便携 ZIP；升级前保留旧目录、显示设置及共享续跑记录。0.2.33 的菜单入口统一为 **5h**，0.2.24 等旧版仍点击 PLUS。
+当前正式版为 **0.2.36**。普通用户使用安装脚本或正式便携 ZIP；升级前保留旧目录、显示设置及共享续跑记录。菜单入口统一为 **5h**，0.2.24 等旧版仍点击 PLUS。
 
 给 Windows 本机 Codex 发这一句话即可表达完整意图：
 
@@ -25,7 +25,7 @@
 - 检查 `CodexWindow`、`DataSource` 和 `LastError`，回复只需说明窗口是否找到、额度连接是否成功。不要转述账户数据。
 - 区分后台 watcher 和 `--codex-child` 显示进程，检查各自的用户、SessionId、程序路径及启动时间。其他目录的实例占用锁时，先从其胶囊菜单退出（0.2.30 起点击 5h，旧版点击 PLUS）；不批量终止 `codex.exe`、ChatGPT 或其他项目进程。
 - 查看 `%LOCALAPPDATA%\CodexQuotaPills\lifecycle.log`：`independent-watcher-ready` 表示启动握手，`independent-launch-failed`、超时或没有显示子进程都应继续诊断，不能宣布成功。
-- 胶囊随 Codex 前台窗口显示，最小化或切换程序会隐藏。当前窗口识别要求 `ChatGPT.exe` 和 `Chrome_WidgetWin_1`；识别不符时报告兼容性问题，不盲目放宽匹配。
+- 胶囊跟随 Codex 窗口；最小化或隐藏 Codex 时收起，切换程序由窗口层级自然遮挡。输入框/侧栏位置无法安全确认时也会隐藏，可从托盘返回标题栏。当前窗口识别要求 `ChatGPT.exe` 和 `Chrome_WidgetWin_1`；识别不符时报告兼容性问题，不盲目放宽匹配。
 - 工具会话读不到交互桌面时，从资源管理器双击程序是直接验证方式。仍不显示时保留诊断结果和日志，定位问题后修复；不要把源码构建成功当作显示成功。
 
 ## 可选参数
@@ -34,7 +34,7 @@
 # 指定已记录 SHA-256 的正式版本，适合 API 暂时限流
 .\install.ps1 -PinnedRelease
 # 已下载便携包：仍按固定 manifest 核对大小和摘要
-.\install.ps1 -PackagePath 'C:\Downloads\CodexQuotaPills-0.2.33-portable.zip' -NoLaunch
+.\install.ps1 -PackagePath 'C:\Downloads\CodexQuotaPills-0.2.36-portable.zip' -NoLaunch
 # 用户明确要求登录 Windows 后自动跟随 Codex
 .\install.ps1 -Startup
 # 隔离验证，不启动程序、不创建入口、不修改续跑设置
@@ -42,6 +42,8 @@
 ```
 
 `-InstallRoot` 是隔离/指定目录模式，不发现目录以外的现有安装。普通用户应使用默认目录，以便复用已有 Startup 入口。
+
+替换已有快捷方式时，备份保存在 `%LOCALAPPDATA%\CodexQuotaPills\ShortcutBackups`，不会在启动文件夹留下 `.bak` 项。不要把旧快捷方式备份放进 Startup 目录。
 
 ## 维护与发布
 

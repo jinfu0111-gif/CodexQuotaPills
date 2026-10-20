@@ -26,7 +26,7 @@ namespace CodexUsageOverlay
             preview = previewMode;
             Text = "额度胶囊 · GitHub 更新"; ClientSize = new Size(460, 238);
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
-            TopMost = true; ShowInTaskbar = !anchor.HasValue; AutoScaleMode = AutoScaleMode.Dpi;
+            TopMost = false; ShowInTaskbar = !anchor.HasValue; AutoScaleMode = AutoScaleMode.Dpi;
             Font = UiRendering.CreateTextFont("Microsoft YaHei UI", 9f, FontStyle.Regular);
             Label version = new Label { Text = "当前版本 v" + GitHubReleaseUpdateService.CurrentVersion,
                 Bounds = new Rectangle(22, 18, 414, 28) };

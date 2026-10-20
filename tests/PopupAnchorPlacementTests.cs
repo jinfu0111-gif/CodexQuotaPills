@@ -7,6 +7,16 @@ namespace CodexUsageOverlay
     {
         internal static void CentersDialogsAbovePlusWhenSpaceAllows()
         {
+            OverlayPlacement saved = PopupUiContext.Placement;
+            try
+            {
+                PopupUiContext.Placement = OverlayPlacement.TitleBar;
+                Assert(PopupUiContext.CapsuleGap(6, 1f) == 14 && PopupUiContext.CapsuleGap(7, 1.5f) == 21,
+                    "title-bar menu/card lost scaled breathing space");
+                PopupUiContext.Placement = OverlayPlacement.ComposerBottom;
+                Assert(PopupUiContext.CapsuleGap(6, 1f) == 6, "title-bar spacing changed composer placement");
+            }
+            finally { PopupUiContext.Placement = saved; }
             Rectangle plus = new Rectangle(400, 300, 50, 26);
             Rectangle area = new Rectangle(0, 0, 1000, 800);
             Point position = PopupAnchorPlacement.NearPlus(

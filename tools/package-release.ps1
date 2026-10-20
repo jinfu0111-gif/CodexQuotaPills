@@ -1,7 +1,8 @@
-param([Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version, [string]$Executable)
+param([Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version, [string]$Executable, [string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$taskDist = Join-Path $taskRoot 'dist'
+$taskDist = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $taskRoot 'dist' }
+New-Item -ItemType Directory -Path $taskDist -Force | Out-Null
 $taskExe = if ($Executable) { (Resolve-Path -LiteralPath $Executable).Path } else { Join-Path $taskRoot 'bin\CodexQuotaPills.exe' }
 if ((Get-Item -LiteralPath $taskExe).VersionInfo.FileVersion -ne "$Version.0") { throw 'Executable version does not match release.' }
 $taskPortable = Join-Path $taskDist "CodexQuotaPills-$Version-portable"
@@ -17,6 +18,7 @@ $taskProductDocs = @(
     'docs\images\composer-pills-preview.png',
     'docs\images\minimal-pills-preview.png',
     'docs\images\placement-bars-preview.png',
+    'docs\images\composer-hide-preview.png',
     'docs\images\unified-plus-menu-preview.png',
     'docs\images\sidebar-light-preview.png',
     'docs\images\sidebar-dark-preview.png',

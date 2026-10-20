@@ -19,6 +19,44 @@ namespace CodexUsageOverlay
         private static int Main(string[] args)
         {
             foreach (string argument in args)
+                if (argument.StartsWith("--composer-layout-readonly=", StringComparison.Ordinal))
+                {
+                    IntPtr handle = CodexWindow.Find();
+                    NativeMethods.RECT rect;
+                    ComposerProbeSnapshot composerSnapshot = null;
+                    Rectangle diagnosticBounds = Rectangle.Empty;
+                    OverlayPlacement diagnosticPlacement = OverlayPlacement.ComposerBottom;
+                    long diagnosticDuration = 0;
+                    if (handle != IntPtr.Zero && NativeMethods.GetWindowRect(handle, out rect))
+                    {
+                        NativeMethods.RECT visible;
+                        if (NativeMethods.TryGetVisibleWindowRect(handle, out visible)) rect = visible;
+                        Rectangle window = Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+                        Thread reader = new Thread(delegate() {
+                            Stopwatch watch = Stopwatch.StartNew();
+                            composerSnapshot = ComposerWindowProbe.Capture(handle, window, NativeMethods.GetWindowDpiScale(handle));
+                            diagnosticDuration = watch.ElapsedMilliseconds;
+                            diagnosticBounds = ComposerPlacementPolicy.Resolve(handle, window, Screen.FromHandle(handle).WorkingArea,
+                                new Size((int)(140 * composerSnapshot.Scale), (int)(28 * composerSnapshot.Scale)),
+                                composerSnapshot.Scale, composerSnapshot, DateTime.UtcNow, out diagnosticPlacement);
+                        }) { IsBackground = true };
+                        reader.SetApartmentState(ApartmentState.MTA); reader.Start();
+                        reader.Join(5000);
+                    }
+                    File.WriteAllLines(argument.Substring("--composer-layout-readonly=".Length).Trim('"'), new[] {
+                        "WindowFound=" + (handle != IntPtr.Zero),
+                        "ProbeState=" + (composerSnapshot == null ? "Unavailable" : composerSnapshot.State.ToString()),
+                        "ToolbarHost=" + (composerSnapshot == null ? Rectangle.Empty : composerSnapshot.ToolbarHost),
+                        "CodexPane=" + (composerSnapshot == null ? Rectangle.Empty : composerSnapshot.Pane),
+                        "EditorBounds=" + (composerSnapshot == null ? Rectangle.Empty : composerSnapshot.Editor),
+                        "HostKind=" + (composerSnapshot == null ? "None" : composerSnapshot.HostKind),
+                        "EffectivePlacement=" + diagnosticPlacement,
+                        "OverlayBounds=" + diagnosticBounds,
+                        "CaptureMilliseconds=" + diagnosticDuration,
+                        "MessagesSent=0", "EditorContentsRead=0", "SettingsWrites=0", "VisibleWindowsCreated=0" });
+                    return 0;
+                }
+            foreach (string argument in args)
             {
                 if (argument.StartsWith("--sidebar-layout-readonly=", StringComparison.Ordinal))
                 {
@@ -429,6 +467,8 @@ namespace CodexUsageOverlay
         private readonly QuotaHoverCardForm quotaHoverCard;
         private NativeMethods.WinEventDelegate windowLocationChangedDelegate;
         private IntPtr windowLocationHook = IntPtr.Zero;
+        private IntPtr windowMoveHook = IntPtr.Zero;
+        private IntPtr windowForegroundHook = IntPtr.Zero;
         private uint windowLocationHookProcessId;
         private readonly bool exitWhenCodexStops;
         private DateTime? codexMissingSinceUtc;
@@ -436,6 +476,9 @@ namespace CodexUsageOverlay
 
         private const int HeaderHeight = 28;
         private readonly SidebarWindowProbe sidebarProbe = new SidebarWindowProbe();
+        private readonly ComposerWindowProbe composerProbe = new ComposerWindowProbe();
+        private readonly ComposerVisibilityGate composerVisibility = new ComposerVisibilityGate();
+        private OverlayPlacement effectivePlacement;
         private readonly NotifyIcon sidebarRecoveryIcon = new NotifyIcon();
         private const int ExpandedHeight = 310;
         private const string RunwayPageUrl = "https://didcodexreset.com/";
@@ -452,7 +495,7 @@ namespace CodexUsageOverlay
             this.settings = settings;
             this.exitWhenCodexStops = exitWhenCodexStops;
             sidebarRecoveryIcon.Icon = SystemIcons.Information;
-            sidebarRecoveryIcon.Text = "额度胶囊：窄栏空间不足；双击返回标题栏";
+            sidebarRecoveryIcon.Text = "额度胶囊：当前位置暂不可用；双击返回标题栏";
             ContextMenuStrip recoveryMenu = new ContextMenuStrip();
             recoveryMenu.Items.Add("返回标题栏", null, delegate { SetOverlayPlacement(OverlayPlacement.TitleBar); });
             sidebarRecoveryIcon.ContextMenuStrip = recoveryMenu;
@@ -529,7 +572,7 @@ namespace CodexUsageOverlay
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            TopMost = true;
+            TopMost = false;
             Width = 520;
             Height = 30;
 
@@ -544,6 +587,7 @@ namespace CodexUsageOverlay
             if (disposing)
             {
                 StopImmediateWindowTracking();
+                composerProbe.Dispose();
                 timer.Dispose();
                 taskStatusMonitor.Dispose();
                 autoResumeService.Dispose();
@@ -613,6 +657,14 @@ namespace CodexUsageOverlay
                 processId,
                 0,
                 NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
+            windowMoveHook = NativeMethods.SetWinEventHook(
+                NativeMethods.EVENT_SYSTEM_MOVESIZESTART, NativeMethods.EVENT_SYSTEM_MOVESIZEEND,
+                IntPtr.Zero, windowLocationChangedDelegate, processId, 0,
+                NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
+            windowForegroundHook = NativeMethods.SetWinEventHook(
+                NativeMethods.EVENT_SYSTEM_FOREGROUND, NativeMethods.EVENT_SYSTEM_FOREGROUND,
+                IntPtr.Zero, windowLocationChangedDelegate, processId, 0,
+                NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
             windowLocationHookProcessId = windowLocationHook != IntPtr.Zero
                 ? processId
                 : 0;
@@ -620,6 +672,15 @@ namespace CodexUsageOverlay
 
         private void StopImmediateWindowTracking()
         {
+            if (windowForegroundHook != IntPtr.Zero)
+            {
+                NativeMethods.UnhookWinEvent(windowForegroundHook); windowForegroundHook = IntPtr.Zero;
+            }
+            if (windowMoveHook != IntPtr.Zero)
+            {
+                NativeMethods.UnhookWinEvent(windowMoveHook); windowMoveHook = IntPtr.Zero;
+            }
+            composerVisibility.SetMoving(false, DateTime.UtcNow);
             if (windowLocationHook != IntPtr.Zero)
             {
                 NativeMethods.UnhookWinEvent(windowLocationHook);
@@ -638,6 +699,18 @@ namespace CodexUsageOverlay
             uint eventThread,
             uint eventTime)
         {
+            if (eventType == NativeMethods.EVENT_SYSTEM_FOREGROUND && hWnd == codexWindow)
+            {
+                if (NativeMethods.IsWindowVisible(Handle))
+                    OverlayWindowPresentation.PositionInAppStack(Handle, codexWindow);
+                return;
+            }
+            if (hWnd != IntPtr.Zero && hWnd == codexWindow &&
+                (eventType == NativeMethods.EVENT_SYSTEM_MOVESIZESTART || eventType == NativeMethods.EVENT_SYSTEM_MOVESIZEEND))
+            {
+                composerVisibility.SetMoving(eventType == NativeMethods.EVENT_SYSTEM_MOVESIZESTART, DateTime.UtcNow);
+                return;
+            }
             if (hWnd == IntPtr.Zero || hWnd != codexWindow ||
                 objectId != NativeMethods.OBJID_WINDOW ||
                 !NativeMethods.IsWindowVisible(Handle) || settingsExpanded)
@@ -651,13 +724,19 @@ namespace CodexUsageOverlay
                 rect = visibleRect;
 
             Screen targetScreen = Screen.FromHandle(hWnd);
+            dpiScale = NativeMethods.GetWindowDpiScale(hWnd);
             Rectangle window = Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
             Rectangle sidebar = PopupUiContext.Sidebar;
             if (!sidebar.IsEmpty)
                 sidebar = new Rectangle(window.Location, new Size(sidebar.Width, window.Height));
-            Rectangle desired = OverlayPlacementLayout.CalculateBounds(settings.Placement,
-                window, targetScreen.WorkingArea, new Size(Width, Height), dpiScale, sidebar);
-            if (desired.IsEmpty) return;
+            Rectangle desired = ResolveOverlayBounds(window, targetScreen.WorkingArea, new Size(Width, Height), sidebar);
+            if (desired.IsEmpty)
+            {
+                quotaHoverCard.HideCard(); placementSelector.HideSelector(); resetRadarBanner.HideBanner();
+                HideGuideBubble(); Hide(); lastRenderedBounds = Rectangle.Empty; PopupUiContext.Anchor = Rectangle.Empty;
+                return;
+            }
+            PopupUiContext.Placement = effectivePlacement;
             PopupUiContext.WindowBounds = window;
             PopupUiContext.Sidebar = sidebar;
             PopupUiContext.WorkingArea = targetScreen.WorkingArea;
@@ -720,6 +799,7 @@ namespace CodexUsageOverlay
             if (nextWindow != codexWindow)
             {
                 StopImmediateWindowTracking();
+                InvalidateComposerPlacement();
                 codexWindow = nextWindow;
                 lastRenderedBounds = Rectangle.Empty;
                 quotaHoverCard.HideCard();
@@ -731,11 +811,10 @@ namespace CodexUsageOverlay
                 foregroundWindow == guideBubble.Handle;
             bool menuHasFocus = updateMenu.Visible &&
                 foregroundWindow == updateMenu.Handle;
-            if (codexWindow == IntPtr.Zero || NativeMethods.IsIconic(codexWindow) ||
-                !NativeMethods.IsWindowVisible(codexWindow) ||
-                (!settingsExpanded && foregroundWindow != codexWindow &&
-                    !guideHasFocus && !menuHasFocus && !PopupUiContext.OwnsForeground(foregroundWindow)))
+            if (codexWindow == IntPtr.Zero || !OverlayWindowPresentation.ShouldDisplayCapsule(
+                OverlayWindowPresentation.IsAppVisible(codexWindow), NativeMethods.IsIconic(codexWindow)))
             {
+                InvalidateComposerPlacement();
                 if (updateMenu.Visible)
                     updateMenu.Close();
                 quotaHoverCard.HideCard();
@@ -744,6 +823,15 @@ namespace CodexUsageOverlay
                 HideGuideBubble();
                 Hide();
                 return;
+            }
+            // Focus loss closes transient UI, but never resets/hides the capsule.
+            // Its normal z-order lets the foreground application cover only overlap.
+            if (!settingsExpanded && foregroundWindow != codexWindow &&
+                !guideHasFocus && !menuHasFocus && !PopupUiContext.OwnsForeground(foregroundWindow))
+            {
+                if (updateMenu.Visible) updateMenu.Close();
+                quotaHoverCard.HideCard(); placementSelector.HideSelector();
+                resetRadarBanner.HideBanner(); HideGuideBubble();
             }
 
             NativeMethods.RECT rect;
@@ -772,18 +860,20 @@ namespace CodexUsageOverlay
             Rectangle sidebarBounds = settings.Placement == OverlayPlacement.Sidebar
                 ? sidebarProbe.Read(codexWindow, windowBounds, targetScreen.WorkingArea,
                     dpiScale, foregroundWindow == codexWindow) : Rectangle.Empty;
-            Rectangle desiredBounds = OverlayPlacementLayout.CalculateBounds(settings.Placement,
-                windowBounds, targetScreen.WorkingArea,
+            Rectangle desiredBounds = ResolveOverlayBounds(windowBounds, targetScreen.WorkingArea,
                 new Size(ScalePixels(preferredOverlayWidth), ScalePixels(settingsExpanded ? ExpandedHeight : HeaderHeight)),
-                dpiScale, sidebarBounds);
-            PopupUiContext.Placement = settings.Placement;
+                sidebarBounds);
+            PopupUiContext.Placement = effectivePlacement;
             PopupUiContext.CodexWindow = codexWindow;
             PopupUiContext.WindowBounds = windowBounds;
             PopupUiContext.Sidebar = sidebarBounds;
             PopupUiContext.WorkingArea = targetScreen.WorkingArea;
             if (desiredBounds.IsEmpty)
             {
-                sidebarRecoveryIcon.Visible = settings.Placement == OverlayPlacement.Sidebar;
+                sidebarRecoveryIcon.Text = settings.Placement == OverlayPlacement.ComposerBottom
+                    ? "额度胶囊：输入框空间不足或定位待确认，稳定后自动恢复"
+                    : "额度胶囊：当前位置暂不可用；双击返回标题栏";
+                sidebarRecoveryIcon.Visible = settings.Placement == OverlayPlacement.Sidebar || settings.Placement == OverlayPlacement.ComposerBottom;
                 quotaHoverCard.HideCard(); placementSelector.HideSelector();
                 resetRadarBanner.HideBanner(); HideGuideBubble(); Hide();
                 lastRenderedBounds = Rectangle.Empty; PopupUiContext.Anchor = Rectangle.Empty;
@@ -793,7 +883,8 @@ namespace CodexUsageOverlay
             int overlayLeft = desiredBounds.Left, overlayTop = desiredBounds.Top;
             int overlayWidth = desiredBounds.Width, overlayHeight = desiredBounds.Height;
             bool showRadarBanner = !settingsExpanded &&
-                ResetRadarBannerForm.ShouldShow(resetRadar);
+                ResetRadarBannerForm.ShouldShow(resetRadar) &&
+                (foregroundWindow == codexWindow || PopupUiContext.OwnsForeground(foregroundWindow));
             int radarBannerHeight = ScalePixels(ResetRadarBannerForm.LogicalHeight);
             int radarBannerGap = ScalePixels(ResetRadarBannerForm.LogicalGap);
             int radarBannerWidth = settings.Placement == OverlayPlacement.Sidebar
@@ -811,14 +902,14 @@ namespace CodexUsageOverlay
             }
 
             bool becameVisible = !Visible || !NativeMethods.IsWindowVisible(Handle);
+            OverlayWindowPresentation.PositionInAppStack(Handle, codexWindow);
             if (!Visible)
             {
                 Show();
                 NativeMethods.ShowWindow(Handle, NativeMethods.SW_SHOWNOACTIVATE);
             }
-            // Managed TopMost/Visible may remain true after an owned popup or
-            // native ShowWindow changed actual HWND state. Recover without focus.
-            becameVisible = OverlayWindowPresentation.Recover(this) || becameVisible;
+            // Restore native visibility without global topmost or focus changes.
+            becameVisible = OverlayWindowPresentation.Recover(this, codexWindow) || becameVisible;
             showRadarBanner = showRadarBanner && !GuideSessionActive &&
                 radarBannerPolicy.ShouldDisplay(DateTimeOffset.Now);
             if (showRadarBanner)
@@ -868,6 +959,22 @@ namespace CodexUsageOverlay
             if (themeChanged && placementSelector.Visible)
                 placementSelector.ShowSelector(settings.Placement, PopupUiContext.Anchor,
                     targetScreen.WorkingArea, dpiScale, Handle, settings);
+        }
+
+        private Rectangle ResolveOverlayBounds(Rectangle window, Rectangle area, Size preferred, Rectangle sidebar)
+        {
+            if (settings.Placement == OverlayPlacement.ComposerBottom)
+                return composerVisibility.Resolve(codexWindow, window, area, preferred, dpiScale,
+                    composerProbe.Read(codexWindow, window, dpiScale), DateTime.UtcNow, out effectivePlacement);
+            effectivePlacement = settings.Placement;
+            InvalidateComposerPlacement();
+            return OverlayPlacementLayout.CalculateBounds(settings.Placement, window, area, preferred, dpiScale, sidebar);
+        }
+
+        private void InvalidateComposerPlacement()
+        {
+            composerProbe.Invalidate();
+            composerVisibility.Reset();
         }
 
         private int GetPreferredOverlayLogicalWidth(UsageData usage)
@@ -2012,6 +2119,7 @@ namespace CodexUsageOverlay
             if (settings.Placement == placement)
                 return;
             settings.Placement = placement;
+            InvalidateComposerPlacement();
             OverlaySettingsStore.SavePreservingCompletedOnboarding(settings);
             settingsRevision = OverlaySettingsStore.GetRevision();
             lastRenderedBounds = Rectangle.Empty;
@@ -2799,6 +2907,9 @@ namespace CodexUsageOverlay
         internal const int HTCLIENT = 1;
         internal const int HTTRANSPARENT = -1;
         internal const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+        internal const uint EVENT_SYSTEM_MOVESIZESTART = 0x000A;
+        internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+        internal const uint EVENT_SYSTEM_MOVESIZEEND = 0x000B;
         internal const int OBJID_WINDOW = 0;
         internal const uint WINEVENT_OUTOFCONTEXT = 0x0000;
         internal const uint WINEVENT_SKIPOWNPROCESS = 0x0002;

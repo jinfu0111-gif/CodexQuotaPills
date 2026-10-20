@@ -14,6 +14,14 @@
 
 ## 新版合约改变时
 
+### 2026-10-16 分包位置变化适配
+
+官方 Windows 包已更新为 26.1013.3656.0。只读核对安装包后确认六项协议版本仍分别为 11/1/1/2/2/2，原 owner 的 `thread-follower-start-turn` 继续调用 `startTurn(conversationId, turnStart)`，保留 `supportsUntrustedAppInput` 和 `inheritThreadSettings`；实现已移到 `.vite/build/src-*.js`，不再位于 bootstrap 文件中。
+
+校验器继续只读取受限数量、受限大小且位置合法的 src/bootstrap 资源，跨这些文件共同核验声明与实现，并拒绝任意冲突协议。未扩大协议版本、消息权限或官方进程路径范围。隔离 ASAR 回归覆盖旧布局、新分包布局、截断、越界、冲突声明和缺失 capability；真实只读检查成功读取 owner 快照、运行中状态与额度，MessagesSent=0。尚未进行真实额度恢复后的发送验收。
+
+OpenAI 的[App Server 文档](https://developers.openai.com/codex/app-server)描述公开 app-server 接口；这里的桌面 follower IPC 仍以本机官方包的静态代码和只读握手为适配依据，不把公开接口文档当作私有 IPC 合约证明。
+
 先只读检查安装包静态声明与实现，不修改 app.asar。更新适配代码与隔离测试，保留所有原有安全门；运行 test.ps1、build.ps1，随后只读握手/快照和扫描。不要只替换最近验证的版本号，也不要退回 CDP 注入、改审批策略或猜测写请求。
 
 发布新的独立目录与便携/源码 ZIP，保留旧目录。源码包从当前工作区允许列表生成，包含未提交的新源码；禁止加入私密设置、运行缓存、额度账本、认证文件和下载的 MSIX。先打包再迁移本机显示设置。切换 Startup 快捷方式前备份，并核验实际 watcher 与 --codex-child 的版本。

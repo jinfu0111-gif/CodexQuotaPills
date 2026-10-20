@@ -22,7 +22,7 @@ namespace CodexUsageOverlay
     internal static class PlacementMenuLayout
     {
         internal const int LogicalWidth = 344;
-        internal const int LogicalHeight = 324;
+        internal const int LogicalHeight = 288;
 
         internal static bool IsDisplayToggle(PlacementMenuAction action)
         {
@@ -37,25 +37,32 @@ namespace CodexUsageOverlay
 
         internal static Rectangle ChoiceBounds(OverlayPlacement placement)
         {
-            int index = (int)placement;
-            return new Rectangle(72 + (index % 2) * 131, 48 + (index / 2) * 36, 125, 30);
+            int index;
+            switch (placement)
+            {
+                case OverlayPlacement.TitleBar: index = 0; break;
+                case OverlayPlacement.ComposerBottom: index = 1; break;
+                case OverlayPlacement.Sidebar: index = 2; break;
+                default: return Rectangle.Empty;
+            }
+            return new Rectangle(72 + index * 87, 48, index == 2 ? 82 : 81, 30);
         }
 
         internal static Rectangle ActionBounds(PlacementMenuAction action)
         {
             if (action == PlacementMenuAction.CheckGitHubUpdate) return new Rectangle(LogicalWidth - 16 - 81, 8, 81, 30);
-            if (action == PlacementMenuAction.AutoResume) return new Rectangle(72, 288, 256, 30);
-            if (action == PlacementMenuAction.SessionUsage) return new Rectangle(72, 248, 256, 30);
+            if (action == PlacementMenuAction.AutoResume) return new Rectangle(72, 252, 256, 30);
+            if (action == PlacementMenuAction.SessionUsage) return new Rectangle(72, 212, 256, 30);
             if (IsDisplayToggle(action))
             {
                 int slot = action == PlacementMenuAction.TogglePlan ? 0 : action == PlacementMenuAction.ToggleTokens ? 1 : 2;
-                return new Rectangle(72 + slot * 87, 208, slot == 2 ? 82 : 81, 30);
+                return new Rectangle(72 + slot * 87, 172, slot == 2 ? 82 : 81, 30);
             }
             if (IsThemeAction(action))
-                return new Rectangle(72 + ((int)action - (int)PlacementMenuAction.ThemeAuto) * 87, 168, 81, 30);
+                return new Rectangle(72 + ((int)action - (int)PlacementMenuAction.ThemeAuto) * 87, 132, 81, 30);
             int index = (int)action;
             int width = index == 2 ? 82 : 81;
-            return new Rectangle(72 + index * 87, 128, width, 30);
+            return new Rectangle(72 + index * 87, 92, width, 30);
         }
 
         internal static OverlayPlacement? HitTestPlacement(Point location)
@@ -63,7 +70,6 @@ namespace CodexUsageOverlay
             foreach (OverlayPlacement placement in new[]
             {
                 OverlayPlacement.TitleBar,
-                OverlayPlacement.ContentTop,
                 OverlayPlacement.ComposerBottom,
                 OverlayPlacement.Sidebar
             })

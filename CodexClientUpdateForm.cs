@@ -38,7 +38,7 @@ namespace CodexUsageOverlay
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
-            TopMost = true;
+            TopMost = false;
             BackColor = palette.Surface;
             ClientSize = new Size(396, 310);
             DoubleBuffered = true;

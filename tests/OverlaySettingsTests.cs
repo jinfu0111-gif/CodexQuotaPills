@@ -152,8 +152,8 @@ namespace CodexUsageOverlay
                 OverlayPlacement.TitleBar, 100, 900, 3, 44, 52) == 103,
                 "title-bar placement was incorrect");
             Assert(OverlayPlacementLayout.CalculateTop(
-                OverlayPlacement.ContentTop, 100, 900, 3, 44, 52) == 144,
-                "content-top placement was incorrect");
+                OverlayPlacement.ContentTop, 100, 900, 3, 44, 52) == 103,
+                "legacy content-top placement did not resolve to title bar");
             Assert(OverlayPlacementLayout.CalculateTop(
                 OverlayPlacement.ComposerBottom, 100, 900, 3, 44, 52) == 848,
                 "composer-bottom placement was incorrect");
@@ -173,6 +173,16 @@ namespace CodexUsageOverlay
                 Assert(OverlaySettingsStore.LoadFromPath(path).Placement ==
                     OverlayPlacement.ComposerBottom,
                     "placement did not round-trip");
+                foreach (string legacy in new[] { "ContentTop", "contenttop", "1" })
+                {
+                    File.WriteAllLines(path, new[] { "Placement=" + legacy, "UiTheme=Dark", "ShowTokenPill=False" });
+                    OverlaySettings loaded = OverlaySettingsStore.LoadFromPath(path);
+                    Assert(loaded.Placement == OverlayPlacement.TitleBar && loaded.UiTheme == "Dark" && !loaded.ShowTokenPill,
+                        "legacy placement migration changed other settings or retained window top");
+                }
+                settings.Placement = OverlayPlacement.ContentTop;
+                Assert(OverlaySettingsStore.SaveToPath(settings, path) && File.ReadAllText(path).Contains("Placement=TitleBar"),
+                    "saving legacy placement persisted removed window top");
             }
             finally
             {
@@ -186,7 +196,8 @@ namespace CodexUsageOverlay
             string text = FirstRunGuideForm.AllPageText;
             Assert(!text.Contains("↻") && !text.Contains("右键点击") && !text.Contains("点击 PLUS") && text.Contains("点击 5h") &&
                 text.Contains("逐张查看到期时间") &&
-                text.Contains("无需手动扫描或开启"), "guide still describes obsolete controls or opt-in flow");
+                text.Contains("安装脚本新安装时预先暂停") && text.Contains("手动首次运行且没有旧记录") &&
+                !text.Contains("切到其他程序或最小化时自动隐藏"), "guide describes obsolete controls, visibility or continuation defaults");
             OverlaySettings old = new OverlaySettings { OnboardingCompleted = true };
             Assert(old.NeedsOnboarding, "old guide completion suppressed updated guide");
             OverlaySettings completed = new OverlaySettings { OnboardingCompleted = true,

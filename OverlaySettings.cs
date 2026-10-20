@@ -11,7 +11,7 @@ namespace CodexUsageOverlay
     internal enum OverlayPlacement
     {
         TitleBar,
-        ContentTop,
+        ContentTop, // Reserved legacy value; old settings migrate to TitleBar.
         ComposerBottom,
         Sidebar
     }
@@ -37,21 +37,15 @@ namespace CodexUsageOverlay
             }
             // Separate host rectangles. The OS menu bar is not the chat pane:
             // its free space ends before the three caption buttons.
-            int contentLeft = window.Left + (window.Width >= pixels(900) ? pixels(290) : pixels(52));
             Rectangle host;
-            if (placement == OverlayPlacement.TitleBar)
+            if (placement == OverlayPlacement.TitleBar || placement == OverlayPlacement.ContentTop)
                 host = Rectangle.FromLTRB(window.Left + pixels(320), window.Top,
                     window.Right - pixels(138), window.Top + pixels(44));
-            else if (placement == OverlayPlacement.ContentTop)
-                host = Rectangle.FromLTRB(contentLeft, window.Top + pixels(44), window.Right, window.Top + pixels(96));
             else
             {
-                int composerWidth = Math.Min(pixels(736), window.Right - contentLeft - pixels(32));
-                int composerLeft = contentLeft + (window.Right - contentLeft - composerWidth) / 2;
-                // Start immediately after the native + / approval controls;
-                // keep the model, microphone and send controls unobstructed.
-                host = new Rectangle(composerLeft + pixels(130), window.Bottom - pixels(56),
-                    composerWidth - pixels(130 + 184), pixels(28));
+                // Bottom placement requires an observed toolbar host. Window geometry
+                // alone cannot distinguish Settings, one-line input, or a resized composer.
+                return Rectangle.Empty;
             }
             return InHost(placement, host, area, preferred, scale);
         }
@@ -75,8 +69,6 @@ namespace CodexUsageOverlay
             int contentTopOffset,
             int composerBottomInset)
         {
-            if (placement == OverlayPlacement.ContentTop)
-                return windowTop + contentTopOffset;
             if (placement == OverlayPlacement.ComposerBottom)
                 return windowBottom - composerBottomInset;
             return windowTop + titleBarInset;
@@ -144,7 +136,7 @@ namespace CodexUsageOverlay
                     else if (key == "Placement" &&
                         Enum.TryParse(value, true, out placement) &&
                         Enum.IsDefined(typeof(OverlayPlacement), placement))
-                        settings.Placement = placement;
+                        settings.Placement = placement == OverlayPlacement.ContentTop ? OverlayPlacement.TitleBar : placement;
                     else if (key == "UiTheme" && (value == "Auto" || value == "Light" || value == "Dark")) settings.UiTheme = value;
                     else if (key == "ShowPlanPill" && Boolean.TryParse(value, out enabled)) settings.ShowPlanPill = enabled;
                     else if (key == "ShowTokenPill" && Boolean.TryParse(value, out enabled)) settings.ShowTokenPill = enabled;
@@ -238,7 +230,7 @@ namespace CodexUsageOverlay
                     "Theme=" + settings.Theme,
                     "CustomBackgroundArgb=" + settings.CustomBackgroundArgb.ToString(CultureInfo.InvariantCulture),
                     "RefreshSeconds=" + settings.RefreshSeconds.ToString(CultureInfo.InvariantCulture),
-                    "Placement=" + settings.Placement.ToString(),
+                    "Placement=" + (settings.Placement == OverlayPlacement.ContentTop ? OverlayPlacement.TitleBar : settings.Placement).ToString(),
                     "UiTheme=" + settings.UiTheme,
                     "ShowPlanPill=" + settings.ShowPlanPill.ToString(CultureInfo.InvariantCulture),
                     "ShowTokenPill=" + settings.ShowTokenPill.ToString(CultureInfo.InvariantCulture),
@@ -289,7 +281,7 @@ namespace CodexUsageOverlay
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = true;
-            TopMost = true;
+            TopMost = false;
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(430, 285);
             Font = UiRendering.CreateTextFont("Microsoft YaHei UI", 9f, FontStyle.Regular);

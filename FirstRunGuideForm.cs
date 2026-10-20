@@ -28,15 +28,15 @@ namespace CodexUsageOverlay
             new GuidePage(
                 "看懂额度胶囊",
                 "5h 和周额度显示剩余百分比。悬停周额度查看重置与 Tibo 信息；悬停粉色券胶囊，逐张查看到期时间。",
-                "胶囊跟随 Codex；切到其他程序或最小化时自动隐藏。"),
+                "胶囊跟随 Codex；其他程序自然遮挡它，最小化 Codex 时收起。"),
             new GuidePage(
                 "点击 5h 打开菜单",
                 "所有位置都点击 5h 开菜单；套餐、Token 与券可分别隐藏，仅留 5h 和周额度。侧栏弹窗向右展开。",
                 "悬停卡移开鼠标即收起；普通模式另有券到期详情，新 Tibo 横幅 10 秒后关闭。"),
             new GuidePage(
                 "额度恢复，自动续跑",
-                "新版默认在后台检测额度中断；额度恢复后，在原对话继续未完成任务，无需手动扫描或开启。",
-                "5h → 自动续跑可查看或暂停；关闭面板不会停止监测。"),
+                "后台检测额度中断；开启自动续跑后，额度恢复时在原对话继续未完成任务。安装脚本新安装时预先暂停。",
+                "5h → 自动续跑可查看、开启或暂停；关闭面板不会停止监测。"),
             new GuidePage(
                 "哪些任务不会续跑",
                 "手动停止、已经完成、正在执行或等待审批的任务不会续跑。每个对话累计最多自动尝试 3 次。",
@@ -48,7 +48,7 @@ namespace CodexUsageOverlay
             new GuidePage(
                 "以后随时可以再看",
                 "指引完成或跳过后不重复。需要回顾时，点击 5h → 刷新间隔 → 使用指引。",
-                "自动续跑默认开启；主动暂停后，下次启动仍保持暂停。")
+                "手动首次运行且没有旧记录时续跑默认开启；已有开关保持，主动暂停会跨重启保留。")
         };
 
         internal static string AllPageText
@@ -105,7 +105,7 @@ namespace CodexUsageOverlay
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            TopMost = true;
+            TopMost = false;
             StartPosition = FormStartPosition.Manual;
             ClientSize = new Size(LogicalWidth, LogicalHeight);
             AutoScaleMode = AutoScaleMode.Dpi;

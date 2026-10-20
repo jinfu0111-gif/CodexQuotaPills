@@ -8,6 +8,18 @@ internal static class ResetRadarTests
 
     private static int Main(string[] args)
     {
+        const string composerAssemblyPrefix = "--composer-placement-assembly=";
+        if (args.Length == 1 && args[0].StartsWith(composerAssemblyPrefix, StringComparison.Ordinal))
+        {
+            System.Reflection.Assembly assembly = System.Reflection.Assembly.LoadFrom(args[0].Substring(composerAssemblyPrefix.Length));
+            Run("production assembly never guesses the bottom input host", delegate {
+                ComposerPlacementTests.PublishedAssemblyCannotGuessComposer(assembly);
+            });
+            Run("production clips captured overflowing composer container", delegate {
+                ComposerPlacementTests.PublishedAssemblyClipsOverflowingComposer(assembly);
+            });
+            return failures == 0 ? 0 : 1;
+        }
         const string cursorAssemblyPrefix = "--cursor-message-assembly=";
         if (args.Length == 1 && args[0].StartsWith(cursorAssemblyPrefix, StringComparison.Ordinal))
         {
@@ -138,14 +150,40 @@ internal static class ResetRadarTests
         Run("independent settings uses monotonic guide state", OverlaySettingsTests.IndependentSettingsUsesMonotonicGuideState);
         Run("placement persists and maps to three anchors", OverlaySettingsTests.PlacementRoundTripsAndCalculatesThreePositions);
         Run("unified PLUS menu keeps all seven pills separate", PlacementMenuLayoutTests.UnifiedMenuActionsUseSeparatePills);
-        Run("four positions and themes round trip", SidebarLayoutTests.FourPositionsAndThemesRoundTrip);
+        Run("three positions and themes round trip", SidebarLayoutTests.ThreePositionsAndThemesRoundTrip);
         Run("sidebar and right popups honor DPI and monitor origins", SidebarLayoutTests.SidebarGeometryAndRightPopups);
         Run("sidebar preserves pills and click targets", SidebarLayoutTests.SidebarPreservesPillsAndHitTargets);
         Run("sidebar 5h menu and weekly hover are separate", SidebarLayoutTests.SidebarSeparatesMenuAndHover);
-        Run("host bars center and composer starts left", SidebarLayoutTests.HostBarsCenterAndComposerStartsLeft);
+        Run("host bars center and bottom requires an observed host", SidebarLayoutTests.HostBarsCenterAndComposerStartsLeft);
+        Run("settings and unreadable UIA hide input overlay", ComposerPlacementTests.SettingsDoesNotKeepOldBottomPosition);
+        Run("single-line composer cannot cover editable text", ComposerPlacementTests.SingleLineCannotCoverText);
+        Run("observed toolbar avoids native controls at mixed DPI", ComposerPlacementTests.SeparateToolbarAvoidsAllOccupiedControls);
+        Run("attachments and large editors deny unsafe toolbar gaps", ComposerPlacementTests.AttachmentsAndLargeEditorForceFallback);
+        Run("stale moved and DPI-changed anchors are rejected", ComposerPlacementTests.StaleWindowAndDpiResultsCannotRestoreBottom);
+        Run("input preference survives hiding and recovery", ComposerPlacementTests.PreferenceSurvivesFallbackAndRecovery);
+        Run("composer identity rejects search and unrelated actions", ComposerPlacementTests.ProbeIdentityRejectsSearchAndOtherButtons);
+        Run("slow UIA uses one worker and discards invalidated results", ComposerPlacementTests.SlowProbeHasOneWorkerAndDiscardsInvalidatedResult);
+        Run("captured narrow composer ignores question and browser editors", ComposerPlacementTests.CapturedNarrowLayoutIgnoresQuestionAndBrowser);
+        Run("single-line input hides instead of docking above at mixed DPI", ComposerPlacementTests.SingleLineHidesAtEveryDpi);
+        Run("visible hidden recovery trace requires stable captures", ComposerPlacementTests.VisibleHiddenRecoveryTraceRequiresStableCaptures);
+        Run("cached samples and layout changes cannot bypass recovery", ComposerPlacementTests.RepeatedCacheAndLayoutChangesCannotBypassRecovery);
+        Run("input mode rejects narrow and outside hosts without shrinking", ComposerPlacementTests.InputModeDoesNotShrinkOrAcceptAnOutsideHost);
+        Run("unrelated sidebar source avatar popups preserve visible input capsule", ComposerPlacementTests.UnrelatedFloatingGeometryPreservesVisibleCapsule);
+        Run("overlapping popup hides and dismissal waits before recovery", ComposerPlacementTests.OverlappingPopupHidesAndRecoveryStillWaits);
+        Run("transient UIA failures preserve a bounded validated anchor", ComposerPlacementTests.TemporaryFailuresHaveBoundedLeaseAndNoBlink);
+        Run("pure window moves follow without delay and resize hides", ComposerPlacementTests.PureMovesFollowWithoutConfirmationAndResizeStillHides);
+        Run("safe gap changes keep the established capsule position", ComposerPlacementTests.SafeGapChangesKeepEstablishedPosition);
+        Run("native drag preserves relative anchor and release rechecks", ComposerPlacementTests.NativeMoveSessionPreservesAnchorUntilRecheck);
+        Run("pure movement keeps worker cache and in-flight capture", ComposerPlacementTests.ProbePureMoveKeepsCacheAndInFlightGeneration);
+        Run("permission anchor never selects a later arbitrary gap", ComposerPlacementTests.PermissionAnchorNeverJumpsToAnotherGap);
+        Run("scrolling pane preserves toolbar and permission moves realign", ComposerPlacementTests.ScrollingPaneDoesNotResetAnUnchangedToolbar);
+        Run("overflowing composer ancestor clips to visible safe toolbar", ComposerPlacementTests.OverflowingComposerContainerUsesVisibleIntersection);
+        Run("missing and ambiguous Codex anchors are rejected", ComposerPlacementTests.MissingOrAmbiguousCodexAnchorsAreRejected);
         Run("sidebar boundary detection fails closed", SidebarLayoutTests.BoundaryDetectionDoesNotGuessCollapsedSidebar);
         Run("dark palette contrast and light restoration", SidebarLayoutTests.DarkPaletteIsReadableAndRestoresLight);
         Run("popup focus collapse and minimize policy", SidebarLayoutTests.PopupFocusAndCollapsePolicy);
+        Run("capsule follows ChatGPT visibility and external window order", SidebarLayoutTests.CapsuleAppScopeAndWindowOrder);
+        Run("real HWND predecessor overrides misleading enumeration", SidebarLayoutTests.ActualPredecessorOverridesMisleadingEnumeration);
         Run("dialogs center above PLUS", PopupAnchorPlacementTests.CentersDialogsAbovePlusWhenSpaceAllows);
         Run("nearly fitting updater stays above PLUS", PopupAnchorPlacementTests.KeepsNearlyFittingUpdaterAbovePlus);
         Run("dialogs fall below only when above cannot fit", PopupAnchorPlacementTests.FallsBelowOnlyWhenAboveCannotFit);

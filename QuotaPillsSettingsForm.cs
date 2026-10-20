@@ -18,7 +18,7 @@ namespace CodexUsageOverlay
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = !plusAnchor.HasValue;
-            TopMost = true;
+            TopMost = false;
             StartPosition = plusAnchor.HasValue
                 ? FormStartPosition.Manual : FormStartPosition.CenterScreen;
             ClientSize = new Size(430, 214);

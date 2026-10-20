@@ -32,7 +32,7 @@ namespace CodexUsageOverlay
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            TopMost = true;
+            TopMost = false;
             Cursor = Cursors.Hand;
             Width = 720;
             Height = LogicalHeight;

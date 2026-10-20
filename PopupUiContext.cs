@@ -43,6 +43,12 @@ namespace CodexUsageOverlay
             Dark = dark; ThemeRevision++; return true;
         }
 
+        internal static int CapsuleGap(int normalGap, float scale)
+        {
+            return Placement == OverlayPlacement.TitleBar
+                ? Math.Max(normalGap, (int)Math.Round(14 * scale)) : normalGap;
+        }
+
         internal static Point Place(Rectangle anchor, Size size, Rectangle area, int gap, int margin)
         {
             if (Placement != OverlayPlacement.Sidebar || Sidebar.IsEmpty)
@@ -217,16 +223,93 @@ namespace CodexUsageOverlay
 
     internal static class OverlayWindowPresentation
     {
+        internal static bool IsAppVisible(IntPtr app)
+        {
+            if (app == IntPtr.Zero || !IsWindowVisible(app)) return false;
+            try
+            {
+                int cloaked;
+                if (DwmGetWindowAttribute(app, 14, out cloaked, 4) == 0 && cloaked != 0) return false;
+            }
+            catch { }
+            return true;
+        }
+
+        internal static bool ShouldDisplayCapsule(bool appVisible, bool minimized)
+        {
+            return appVisible && !minimized;
+        }
+
+        // Operate only on our HWND. Do not attach input queues to the foreign
+        // process or reorder/demote its window. External windows above the app
+        // stay above the capsule and obscure only their actual overlap.
+        // Legacy inventory fixture retained for the captured regression tests.
+        // Never use this to place a real HWND; use FindInsertionFromPrevious.
+        internal static IntPtr FindInsertion(IList<IntPtr> order, IntPtr app, IntPtr overlay,
+            bool appTopmost, Func<IntPtr, bool> isTopmost)
+        {
+            IntPtr previous = IntPtr.Zero;
+            foreach (IntPtr window in order)
+            {
+                if (window == overlay) continue;
+                if (window == app)
+                    return previous == IntPtr.Zero || (!appTopmost && isTopmost(previous)) ? IntPtr.Zero : previous;
+                previous = window;
+            }
+            return overlay; // Missing app: no z-order mutation.
+        }
+
+        internal static bool PositionInAppStack(IntPtr overlay, IntPtr app)
+        {
+            if (overlay == IntPtr.Zero || app == IntPtr.Zero || !IsWindow(app)) return false;
+            bool topmost = (GetWindowLong(app, -20) & 8) != 0;
+            bool overlayTopmost = (GetWindowLong(overlay, -20) & 8) != 0;
+            if (overlayTopmost != topmost)
+                SetWindowPos(overlay, topmost ? new IntPtr(-1) : new IntPtr(-2), 0, 0, 0, 0,
+                    0x0001 | 0x0002 | 0x0010 | 0x0200);
+            // EnumWindows is an inventory, not the authoritative adjacent HWND
+            // chain (hosted/owned windows can be absent or enumerated differently).
+            IntPtr previous = GetWindow(app, 3); // GW_HWNDPREV
+            IntPtr after = FindInsertionFromPrevious(previous, overlay, topmost,
+                previous != IntPtr.Zero && (GetWindowLong(previous, -20) & 8) != 0);
+            if (after == overlay) return false;
+            return SetWindowPos(overlay, after, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200);
+        }
+
+        internal static IntPtr FindInsertionFromPrevious(IntPtr previous, IntPtr overlay,
+            bool appTopmost, bool previousTopmost)
+        {
+            if (previous == overlay) return overlay;
+            return previous == IntPtr.Zero || (!appTopmost && previousTopmost) ? IntPtr.Zero : previous;
+        }
+
         internal static bool Recover(Form form)
         {
-            bool changed = !IsWindowVisible(form.Handle) || (GetWindowLong(form.Handle, -20) & 8) == 0;
-            if (!form.Visible) form.Show();
+            // Keep owned dialogs above their own overlay owner, whose position
+            // already follows Codex. Ignore WinForms' hidden taskbar owner HWND.
+            IntPtr app = GetWindow(form.Handle, 4);
+            bool knownOwner = false;
+            foreach (Form open in Application.OpenForms)
+                if (open.IsHandleCreated && open.Handle == app) { knownOwner = true; break; }
+            if (!knownOwner) app = PopupUiContext.CodexWindow;
+            return Recover(form, app);
+        }
+
+        internal static bool Recover(Form form, IntPtr app)
+        {
+            bool changed = !IsWindowVisible(form.Handle);
+            if (app == IntPtr.Zero || !IsWindow(app)) return false;
+            PositionInAppStack(form.Handle, app);
             if (changed)
-                SetWindowPos(form.Handle, new IntPtr(-1), 0, 0, 0, 0,
-                    0x0001 | 0x0002 | 0x0010 | 0x0040 | 0x0200); // size/move unchanged, no activation
+                SetWindowPos(form.Handle, IntPtr.Zero, 0, 0, 0, 0,
+                    0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0040 | 0x0200);
             return changed;
         }
 
+        [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute,
+            out int value, int size);
+        [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
+        [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after,

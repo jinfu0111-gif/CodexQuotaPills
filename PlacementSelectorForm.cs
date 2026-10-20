@@ -44,7 +44,7 @@ namespace CodexUsageOverlay
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            TopMost = true;
+            TopMost = false;
             Width = LogicalWidth;
             Height = LogicalHeight;
 
@@ -88,7 +88,7 @@ namespace CodexUsageOverlay
             int width = Scale(LogicalWidth);
             int height = Scale(LogicalHeight);
             Point position = PopupAnchorPlacement.NearPlus(anchorBounds,
-                new Size(width, height), workingArea, Scale(LogicalGap), Scale(4));
+                new Size(width, height), workingArea, PopupUiContext.CapsuleGap(Scale(LogicalGap), dpiScale), Scale(4));
             SetBounds(position.X, position.Y, width, height, BoundsSpecified.All);
             if (!Visible)
             {
@@ -207,7 +207,7 @@ namespace CodexUsageOverlay
                     anchorWindowBounds = PopupUiContext.WindowBounds;
                 }
                 Point position = PopupAnchorPlacement.NearPlus(anchorScreenBounds, Size,
-                    PopupUiContext.WorkingArea, Scale(LogicalGap), Scale(4));
+                    PopupUiContext.WorkingArea, PopupUiContext.CapsuleGap(Scale(LogicalGap), dpiScale), Scale(4));
                 if (Location != position) { Location = position; RenderLayered(); }
             }
             Point pointer = Control.MousePosition;
@@ -275,33 +275,31 @@ namespace CodexUsageOverlay
                     graphics.DrawString("额度胶囊 · v" + GitHubReleaseUpdateService.CurrentVersion, titleFont, titleBrush,
                         new Rectangle(12, 8, 174, 30), labelFormat);
                     graphics.DrawString("显示位置", titleFont, titleBrush,
-                        new Rectangle(12, 66, 55, 30), labelFormat);
+                        new Rectangle(12, 48, 55, 30), labelFormat);
                     graphics.DrawString("常用功能", titleFont, titleBrush,
-                        new Rectangle(12, 128, 55, 30), labelFormat);
+                        new Rectangle(12, 92, 55, 30), labelFormat);
                     graphics.DrawString("外观主题", titleFont, titleBrush,
-                        new Rectangle(12, 168, 55, 30), labelFormat);
+                        new Rectangle(12, 132, 55, 30), labelFormat);
                     graphics.DrawString("胶囊显示", titleFont, titleBrush,
-                        new Rectangle(12, 208, 55, 30), labelFormat);
+                        new Rectangle(12, 172, 55, 30), labelFormat);
                     graphics.DrawString("任务续跑", titleFont, titleBrush,
-                        new Rectangle(12, 288, 55, 30), labelFormat);
+                        new Rectangle(12, 252, 55, 30), labelFormat);
                     graphics.DrawString("会话数据", titleFont, titleBrush,
-                        new Rectangle(12, 248, 55, 30), labelFormat);
+                        new Rectangle(12, 212, 55, 30), labelFormat);
                 }
                 using (Pen divider = new Pen(Color.FromArgb(42, 148, 163, 184), 1f))
                 {
                     graphics.DrawLine(divider, 12, 43, LogicalWidth - 12, 43);
-                    graphics.DrawLine(divider, 12, 121, LogicalWidth - 12, 121);
+                    graphics.DrawLine(divider, 12, 85, LogicalWidth - 12, 85);
                 }
                 DrawAction(graphics, PlacementMenuAction.CheckGitHubUpdate, "检查更新",
                     Color.FromArgb(59, 130, 246), false);
 
-                DrawChoice(graphics, OverlayPlacement.TitleBar, "上 · 标题栏",
+                DrawChoice(graphics, OverlayPlacement.TitleBar, "标题栏",
                     Color.FromArgb(139, 92, 246));
-                DrawChoice(graphics, OverlayPlacement.ContentTop, "中 · 窗口顶",
-                    Color.FromArgb(59, 130, 246));
-                DrawChoice(graphics, OverlayPlacement.ComposerBottom, "下 · 输入框",
+                DrawChoice(graphics, OverlayPlacement.ComposerBottom, "输入框",
                     Color.FromArgb(16, 185, 129));
-                DrawChoice(graphics, OverlayPlacement.Sidebar, "侧 · 侧边栏",
+                DrawChoice(graphics, OverlayPlacement.Sidebar, "侧边栏",
                     Color.FromArgb(236, 72, 153));
                 DrawAction(graphics, PlacementMenuAction.ThemeAuto, "跟随系统", Color.FromArgb(139, 92, 246), false);
                 DrawAction(graphics, PlacementMenuAction.ThemeLight, "浅色", Color.FromArgb(59, 130, 246), false);

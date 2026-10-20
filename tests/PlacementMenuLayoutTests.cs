@@ -49,7 +49,6 @@ namespace CodexUsageOverlay
             foreach (OverlayPlacement placement in new[]
             {
                 OverlayPlacement.TitleBar,
-                OverlayPlacement.ContentTop,
                 OverlayPlacement.ComposerBottom,
                 OverlayPlacement.Sidebar
             })
@@ -62,6 +61,8 @@ namespace CodexUsageOverlay
                 Assert(!PlacementMenuLayout.HitTestAction(center).HasValue,
                     "placement pill overlaps the action row");
             }
+            Assert(PlacementMenuLayout.ChoiceBounds(OverlayPlacement.ContentTop).IsEmpty,
+                "removed window-top placement still has a click target");
             Assert(!PlacementMenuLayout.HitTestAction(new Point(120, 43)).HasValue,
                 "divider is clickable");
         }
