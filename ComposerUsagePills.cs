@@ -27,6 +27,7 @@ namespace CodexUsageOverlay
         public Rectangle RingBounds;
         public Rectangle LabelBounds;
         public int? Remaining;
+        public bool Unlimited;
     }
 
     internal sealed class ComposerUsagePillLayout
@@ -139,6 +140,8 @@ namespace CodexUsageOverlay
             {
                 pill.Remaining = pill.Kind == ComposerUsagePillKind.ShortQuota ? usage.ShortRemaining :
                     pill.Kind == ComposerUsagePillKind.WeeklyQuota ? usage.WeeklyRemaining : null;
+                pill.Unlimited = pill.Kind == ComposerUsagePillKind.ShortQuota &&
+                    usage.HasShortLimitState && usage.ShortUnlimited;
                 pill.Bounds = new Rectangle((canvasWidth - 36) / 2, top, 36, 52);
                 pill.RingBounds = new Rectangle(pill.Bounds.Location, new Size(36, 36));
                 pill.LabelBounds = new Rectangle(pill.Bounds.Left, top + 38, 36, 14);
@@ -153,23 +156,42 @@ namespace CodexUsageOverlay
             ComposerUsagePillLayout layout,
             Font font,
             bool refreshHovered,
-            bool refreshPressed)
+            bool refreshPressed,
+            ComposerUsagePillKind hoveredKind = ComposerUsagePillKind.None)
         {
             foreach (ComposerUsagePill pill in layout.Pills)
-                if (layout.SidebarRings) DrawRing(graphics, pill, font);
-                else DrawPill(graphics, pill, font);
+            {
+                bool hovered = hoveredKind != ComposerUsagePillKind.None && pill.Kind == hoveredKind;
+                if (layout.SidebarRings) DrawRing(graphics, pill, font, hovered);
+                else DrawPill(graphics, pill, font, hovered);
+            }
         }
 
-        private static void DrawRing(Graphics graphics, ComposerUsagePill pill, Font font)
+        private static void DrawRing(Graphics graphics, ComposerUsagePill pill, Font font, bool hovered)
         {
+            Rectangle hitPlate = pill.Bounds;
+            hitPlate.Inflate(3, 2);
+            using (Brush hitBrush = new SolidBrush(Color.FromArgb(1, 0, 0, 0)))
+                graphics.FillRectangle(hitBrush, hitPlate);
+
             Rectangle bounds = pill.RingBounds;
-            using (Brush fill = new SolidBrush(QuotaPillVisuals.Surface)) graphics.FillEllipse(fill, bounds);
+            Color fillColor = hovered
+                ? (PopupUiContext.Dark ? Color.FromArgb(252, 46, 53, 68) : Color.FromArgb(252, 244, 247, 254))
+                : QuotaPillVisuals.Surface;
+            using (Brush fill = new SolidBrush(fillColor)) graphics.FillEllipse(fill, bounds);
+            if (hovered)
+            {
+                using (Pen hoverGlow = new Pen(Color.FromArgb(95, pill.DotColor), 1.2f))
+                    graphics.DrawEllipse(hoverGlow, bounds);
+            }
             Rectangle arc = bounds; arc.Inflate(-2, -2);
             using (Pen track = new Pen(QuotaPillVisuals.Border, 3f)) graphics.DrawEllipse(track, arc);
-            using (Pen accent = new Pen(pill.DotColor, 3f))
+            using (Pen accent = new Pen(pill.DotColor, hovered ? 3.4f : 3f))
             {
                 accent.StartCap = LineCap.Round; accent.EndCap = LineCap.Round;
-                if (pill.Remaining.HasValue && pill.Remaining.Value > 0)
+                if (pill.Unlimited)
+                    graphics.DrawEllipse(accent, arc);
+                else if (pill.Remaining.HasValue && pill.Remaining.Value > 0)
                     graphics.DrawArc(accent, arc, -90, Math.Min(100, pill.Remaining.Value) * 3.6f);
             }
             using (Brush text = new SolidBrush(QuotaPillVisuals.Text))
@@ -177,10 +199,10 @@ namespace CodexUsageOverlay
             {
                 format.Alignment = StringAlignment.Center; format.LineAlignment = StringAlignment.Center;
                 using (Font number = UiRendering.CreateTextFont(font.Name, 7.5f, FontStyle.Bold))
-                using (Font label = UiRendering.CreateTextFont(font.Name, 6.75f, FontStyle.Regular))
-                using (Brush muted = new SolidBrush(QuotaPillVisuals.MutedText))
+                using (Font label = UiRendering.CreateTextFont(font.Name, 6.75f, hovered ? FontStyle.Bold : FontStyle.Regular))
+                using (Brush muted = new SolidBrush(hovered ? QuotaPillVisuals.Text : QuotaPillVisuals.MutedText))
                 {
-                    graphics.DrawString(pill.Remaining.HasValue ? ClampPercent(pill.Remaining).ToString() + "%" : "—",
+                    graphics.DrawString(pill.Unlimited ? "∞" : pill.Remaining.HasValue ? ClampPercent(pill.Remaining).ToString() + "%" : "—",
                         number, text, bounds, format);
                     graphics.DrawString(pill.Text, label, muted, pill.LabelBounds, format);
                 }
@@ -192,9 +214,9 @@ namespace CodexUsageOverlay
             ExportPreview(path, null, 450);
         }
 
-        internal static void ExportPreview(string path, OverlaySettings settings, int width)
+        internal static void ExportPreview(string path, OverlaySettings settings, int width, UsageData previewUsage = null)
         {
-            UsageData usage = new UsageData
+            UsageData usage = previewUsage ?? new UsageData
             {
                 Plan = "Plus",
                 HasPlan = true,
@@ -244,13 +266,14 @@ namespace CodexUsageOverlay
             if (usage == null)
                 usage = new UsageData();
 
-            string plan = String.IsNullOrWhiteSpace(usage.Plan) ? "Codex" : usage.Plan.Trim();
+            string plan = String.IsNullOrWhiteSpace(usage.Plan) ? "Codex" : UsageDisplayText.FormatPlan(usage.Plan);
             if (settings == null || settings.ShowPlanPill)
                 result.Add(NewPill(ComposerUsagePillKind.Plan,
                     plan.ToUpperInvariant(), Color.FromArgb(139, 92, 246)));
 
             result.Add(NewPill(ComposerUsagePillKind.ShortQuota,
-                "5h " + (usage.ShortRemaining.HasValue ? ClampPercent(usage.ShortRemaining) + "%" : "—"),
+                "5h " + (usage.HasShortLimitState && usage.ShortUnlimited ? "∞" :
+                    usage.ShortRemaining.HasValue ? ClampPercent(usage.ShortRemaining) + "%" : "—"),
                 QuotaColor(usage.ShortRemaining, Color.FromArgb(59, 130, 246))));
             if (usage.HasWeeklyRemaining || usage.WeeklyRemaining.HasValue)
                 result.Add(NewPill(ComposerUsagePillKind.WeeklyQuota,
@@ -314,17 +337,28 @@ namespace CodexUsageOverlay
             return -1;
         }
 
-        private static void DrawPill(Graphics graphics, ComposerUsagePill pill, Font font)
+        private static void DrawPill(Graphics graphics, ComposerUsagePill pill, Font font, bool hovered)
         {
+            Rectangle hitPlate = pill.Bounds;
+            hitPlate.Inflate(3, 2);
+            using (Brush hitBrush = new SolidBrush(Color.FromArgb(1, 0, 0, 0)))
+                graphics.FillRectangle(hitBrush, hitPlate);
+
             Rectangle shadowBounds = pill.Bounds;
             shadowBounds.Offset(0, 1);
             using (GraphicsPath shadowPath = RoundedRectangle(shadowBounds, 12))
             using (Brush shadow = new SolidBrush(QuotaPillVisuals.Shadow))
                 graphics.FillPath(shadow, shadowPath);
 
+            Color surfaceColor = hovered
+                ? (PopupUiContext.Dark ? Color.FromArgb(252, 46, 53, 68) : Color.FromArgb(252, 244, 247, 254))
+                : QuotaPillVisuals.Surface;
+            Color borderColor = hovered
+                ? Color.FromArgb(145, pill.DotColor)
+                : QuotaPillVisuals.Border;
             using (GraphicsPath path = RoundedRectangle(pill.Bounds, 12))
-            using (Brush fill = new SolidBrush(QuotaPillVisuals.Surface))
-            using (Pen border = new Pen(QuotaPillVisuals.Border, 1f))
+            using (Brush fill = new SolidBrush(surfaceColor))
+            using (Pen border = new Pen(borderColor, hovered ? 1.25f : 1f))
             {
                 graphics.FillPath(fill, path);
                 graphics.DrawPath(border, path);
@@ -333,7 +367,7 @@ namespace CodexUsageOverlay
             int dotSize = 6;
             int dotLeft = pill.Bounds.Left + 9;
             int dotTop = pill.Bounds.Top + (pill.Bounds.Height - dotSize) / 2;
-            using (Brush halo = new SolidBrush(Color.FromArgb(35,
+            using (Brush halo = new SolidBrush(Color.FromArgb(hovered ? 64 : 35,
                 pill.DotColor.R, pill.DotColor.G, pill.DotColor.B)))
             using (Brush dot = new SolidBrush(pill.DotColor))
             {
@@ -413,7 +447,7 @@ namespace CodexUsageOverlay
         internal static QuotaHoverCardContent BuildSidebarCard(UsageData usage, ResetRadarData radar, DateTimeOffset now)
         {
             QuotaHoverCardContent card = BuildCard(usage, radar, now);
-            card.Title = (usage == null || String.IsNullOrWhiteSpace(usage.Plan) ? "Codex" : usage.Plan.Trim().ToUpperInvariant()) + " · 额度与用量";
+            card.Title = (usage == null || String.IsNullOrWhiteSpace(usage.Plan) ? "Codex" : UsageDisplayText.FormatPlan(usage.Plan)) + " · 额度与用量";
             List<string> rows = new List<string> { card.ShortLine, card.WeeklyLine, card.ExtraLine, card.TiboLine };
             if (usage != null && !String.IsNullOrWhiteSpace(usage.ProfileTokensText))
             {
@@ -466,8 +500,9 @@ namespace CodexUsageOverlay
                     : !radar.NetworkAvailable || radar.IsFromCache
                         ? "Tibo  数据离线 · 不作预告"
                         : "Tibo  暂无有效预告";
-            content.ShortLine = BuildResetLine(
-                "5h", usage.ShortResetText, usage.HasShortResetText);
+            content.ShortLine = usage.HasShortLimitState && usage.ShortUnlimited
+                ? "5h  ∞ · 无 5 小时限额"
+                : BuildResetLine("5h", usage.ShortResetText, usage.HasShortResetText);
             content.WeeklyLine = BuildResetLine(
                 "周", usage.WeeklyResetText, usage.HasWeeklyResetText);
 
@@ -542,3 +577,4 @@ namespace CodexUsageOverlay
         }
     }
 }
+

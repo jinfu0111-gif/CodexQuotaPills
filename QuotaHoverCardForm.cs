@@ -16,6 +16,7 @@ namespace CodexUsageOverlay
         private const int LogicalGap = 7;
 
         private QuotaHoverCardContent content = new QuotaHoverCardContent();
+        private string measuredRevision = String.Empty;
         private string renderedRevision = String.Empty;
         private Rectangle renderedBounds = Rectangle.Empty;
         private float dpiScale = 1f;
@@ -66,8 +67,13 @@ namespace CodexUsageOverlay
 
             content = nextContent;
             dpiScale = Math.Max(0.5f, scale);
-            logicalWidth = MeasureContentWidth(content);
-            logicalHeight = MeasureContentHeight(content);
+            string contentRevision = content.RevisionKey;
+            if (!String.Equals(contentRevision, measuredRevision, StringComparison.Ordinal))
+            {
+                logicalWidth = MeasureContentWidth(content);
+                logicalHeight = MeasureContentHeight(content);
+                measuredRevision = contentRevision;
+            }
             int width = Math.Max(1, (int)Math.Round(logicalWidth * dpiScale));
             int height = Math.Max(1, (int)Math.Round(logicalHeight * dpiScale));
             Point position = PopupAnchorPlacement.NearPlus(anchorScreenBounds,
@@ -89,6 +95,8 @@ namespace CodexUsageOverlay
                     NativeMethods.SetOwner(Handle, owner);
                 NativeMethods.ShowWindow(Handle, NativeMethods.SW_SHOWNOACTIVATE);
             }
+            if (owner != IntPtr.Zero)
+                OverlayWindowPresentation.Recover(this, owner);
 
             string revision = content.RevisionKey + "|" + dpiScale.ToString("0.###") + "|" + PopupUiContext.ThemeRevision;
             if (becameVisible || boundsChanged ||
@@ -285,3 +293,4 @@ namespace CodexUsageOverlay
         }
     }
 }
+

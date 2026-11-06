@@ -21,8 +21,172 @@ namespace CodexUsageOverlay
         private BlockingCollection<string> outputLines;
         private int nextRequestId = 1;
         private bool initialized;
+        private string activeCodexHome = String.Empty;
+        private string lastSyncedNativeAuthSource = String.Empty;
 
         public string LastError { get; private set; }
+
+        public CodexAppServerClient() { }
+#if AUTO_RESUME_TESTS
+        private Func<string, object, IDictionary<string, object>> resetTestRequest;
+        internal CodexAppServerClient(Func<string, object, IDictionary<string, object>> request)
+        { resetTestRequest = request; }
+#endif
+
+        private IDictionary<string, object> ResetCreditRequest(string method, object parameters)
+        {
+#if AUTO_RESUME_TESTS
+            if (resetTestRequest != null) return resetTestRequest(method, parameters);
+#endif
+            if (!EnsureStarted(true)) return null;
+            return SendRequest(method, parameters,
+                method == "account/rateLimitResetCredit/consume" ? 15000 : RequestTimeoutMilliseconds);
+        }
+
+        // Dedicated narrow write path. ReadOnlyRequest remains read-only.
+        public bool TryReadResetCredits(out ResetCreditInventory inventory)
+        {
+            lock (gate)
+            {
+                inventory = null;
+                for (int attempt = 0; attempt < 2; attempt++)
+                {
+                    try
+                    {
+                        if (ReadResetCreditsCore(out inventory))
+                            return true;
+                    }
+                    catch
+                    {
+                        LastError = "重置卡实时读取失败";
+                    }
+#if AUTO_RESUME_TESTS
+                    if (resetTestRequest != null) break;
+#endif
+                    ResetProcess();
+                }
+                return false;
+            }
+        }
+
+        private bool ReadResetCreditsCore(out ResetCreditInventory inventory)
+        {
+            inventory = null;
+            IDictionary<string, object> account = ResetCreditRequest("account/read", ObjectOf("refreshToken", false));
+            IDictionary<string, object> limits = ResetCreditRequest("account/rateLimits/read", ObjectOf("excludeResetCreditDetails", false));
+            if (!TryParseResetCreditInventory(account, limits, DateTime.UtcNow, out inventory))
+            { LastError = "无法确认当前账户与重置卡明细"; return false; }
+            // Recheck the authenticated identity after fetching the inventory.
+            IDictionary<string, object> after = ResetCreditRequest("account/read", ObjectOf("refreshToken", false));
+            ResetCreditInventory confirmed;
+            IDictionary<string, object> latestLimits = ResetCreditRequest("account/rateLimits/read", ObjectOf("excludeResetCreditDetails", false));
+            if (!TryParseResetCreditInventory(after, latestLimits, DateTime.UtcNow, out confirmed) ||
+                confirmed.AccountHash != inventory.AccountHash)
+            { inventory = null; LastError = "重置卡读取期间账户发生变化"; return false; }
+            inventory = confirmed;
+            LastError = String.Empty;
+            return true;
+        }
+
+        public bool TryConsumeResetCredit(string expectedAccountHash, string creditId,
+            string idempotencyKey, out string outcome)
+        {
+            outcome = null;
+            Guid parsed;
+            if (String.IsNullOrWhiteSpace(expectedAccountHash) || String.IsNullOrWhiteSpace(creditId) ||
+                !Guid.TryParseExact(idempotencyKey, "D", out parsed)) return false;
+            lock (gate)
+            {
+                try
+                {
+                    ResetCreditInventory current;
+                    if (!ReadResetCreditsCore(out current) || current.AccountHash != expectedAccountHash)
+                    { LastError = "自动使用重置卡前的账户复核失败"; return false; }
+                    ResetCreditRecord selected = null;
+                    foreach (ResetCreditRecord credit in current.Credits)
+                        if (credit.Id == creditId) { selected = credit; break; }
+                    if (selected == null || selected.Status != "available")
+                    {
+                        if (current.HasDetails && current.AvailableCount == current.Credits.Length)
+                        { outcome = "noCredit"; return true; }
+                        LastError = "重置卡明细暂缺，等待完整的实时记录";
+                        return false;
+                    }
+                    long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    if (selected.ResetType != "codexRateLimits" || !selected.ExpiresAt.HasValue ||
+                        selected.ExpiresAt.Value <= now || selected.ExpiresAt.Value - now > 600)
+                    { LastError = "该重置卡不在到期前10分钟的有效窗口内"; return false; }
+                    IDictionary<string, object> result = ResetCreditRequest("account/rateLimitResetCredit/consume",
+                        new Dictionary<string, object> { { "idempotencyKey", idempotencyKey }, { "creditId", creditId } });
+                    string value = ReadString(result, "outcome");
+                    if (value != "reset" && value != "alreadyRedeemed" &&
+                        value != "nothingToReset" && value != "noCredit")
+                    { LastError = "重置卡使用结果待确认，将保留原幂等键"; return false; }
+                    outcome = value;
+                    LastError = String.Empty;
+                    return true;
+                }
+                catch { LastError = "重置卡使用结果待确认，将保留原幂等键"; ResetProcess(); return false; }
+            }
+        }
+
+        internal static bool TryParseResetCreditInventory(IDictionary<string, object> accountResult,
+            IDictionary<string, object> limitsResult, DateTime readUtc, out ResetCreditInventory inventory)
+        {
+            inventory = null;
+            IDictionary<string, object> account = ReadObject(accountResult, "account");
+            if (account == null || !UsageTrustPolicy.HasAuthenticatedAccount(ReadString(account, "type"))) return false;
+            // The rate-limits response carries the workspace/account ID even when account/read doesn't.
+            string accountId = ReadString(limitsResult, "accountId");
+            if (String.IsNullOrWhiteSpace(accountId) || accountId.Length > 512) return false;
+            string accountReadId = ReadString(account, "accountId");
+            if (!String.IsNullOrWhiteSpace(accountReadId) && accountReadId != accountId) return false;
+            string email = (ReadString(account, "email") ?? String.Empty).Trim().ToLowerInvariant();
+            IDictionary<string, object> details = ReadObject(limitsResult, "rateLimitResetCredits");
+            long count;
+            if (!TryReadLong(details, "availableCount", out count) || count < 0 || count > Int32.MaxValue) return false;
+            ResetCreditInventory next = new ResetCreditInventory {
+                AccountHash = AccountTokenPolicy.Identity("chatgpt|" + accountId + "|" + email),
+                ReadUtc = readUtc, AvailableCount = (int)count };
+            object rowsValue;
+            if (details.TryGetValue("credits", out rowsValue) && rowsValue != null)
+            {
+                object[] rows = rowsValue as object[];
+                if (rows == null || rows.Length > 512) return false;
+                next.HasDetails = true;
+                Dictionary<string, ResetCreditRecord> unique = new Dictionary<string, ResetCreditRecord>(StringComparer.Ordinal);
+                HashSet<string> conflicts = new HashSet<string>(StringComparer.Ordinal);
+                foreach (object row in rows)
+                {
+                    IDictionary<string, object> card = AsObject(row);
+                    string id = ReadString(card, "id");
+                    if (String.IsNullOrWhiteSpace(id) || id.Length > 512) continue;
+                    string status = ReadString(card, "status");
+                    string type = ReadString(card, "resetType");
+                    long expiry;
+                    long? expires = TryReadLong(card, "expiresAt", out expiry) && ResetCreditDetails.IsValidExpiry(expiry)
+                        ? (long?)expiry : null;
+                    ResetCreditRecord previous;
+                    if (unique.TryGetValue(id, out previous))
+                    {
+                        if (previous.ExpiresAt != expires || previous.ResetType != type || previous.Status != status) conflicts.Add(id);
+                        continue;
+                    }
+                    unique.Add(id, new ResetCreditRecord { Id = id, Status = status, ResetType = type, ExpiresAt = expires });
+                }
+                List<ResetCreditRecord> known = new List<ResetCreditRecord>();
+                foreach (KeyValuePair<string, ResetCreditRecord> pair in unique)
+                    if (!conflicts.Contains(pair.Key) && pair.Value.Status == "available") known.Add(pair.Value);
+                if (known.Count > count) return false;
+                known.Sort(delegate(ResetCreditRecord left, ResetCreditRecord right) {
+                    int order = (left.ExpiresAt ?? Int64.MaxValue).CompareTo(right.ExpiresAt ?? Int64.MaxValue);
+                    return order != 0 ? order : StringComparer.Ordinal.Compare(left.Id, right.Id);
+                });
+                next.Credits = known.ToArray();
+            }
+            inventory = next;
+            return true;
+        }
 
         // The resume monitor may inspect history, never generate through this
         // separate app-server: desktop-owned tools must stay with their owner.
@@ -32,12 +196,13 @@ namespace CodexUsageOverlay
                 method != "thread/turns/list" && method != "account/read" &&
                 method != "account/rateLimits/read")
                 throw new InvalidOperationException("Read-only request not allowed");
+            bool requireChatGptAuth = method == "account/read" || method == "account/rateLimits/read";
             lock (gate)
             {
                 try
                 {
                     json.MaxJsonLength = 64 * 1024 * 1024;
-                    if (!EnsureStarted()) return null;
+                    if (!EnsureStarted(requireChatGptAuth)) return null;
                     return SendRequest(method, parameters);
                 }
                 catch
@@ -54,51 +219,55 @@ namespace CodexUsageOverlay
             lock (gate)
             {
                 usage = new UsageData();
-                LastError = String.Empty;
-                try
+                for (int attempt = 0; attempt < 2; attempt++)
                 {
-                    if (!EnsureStarted())
-                        return false;
-
-                    IDictionary<string, object> account = SendRequest("account/read",
-                        ObjectOf("refreshToken", false));
-                    IDictionary<string, object> rateLimits = SendRequest("account/rateLimits/read", null);
-                    if (!TryParseTrustedSnapshot(account, rateLimits, usage))
+                    usage = new UsageData();
+                    LastError = String.Empty;
+                    try
                     {
-                        if (String.IsNullOrWhiteSpace(LastError))
-                            LastError = "Codex app-server 没有返回可验证的登录账户与额度窗口";
-                        return false;
-                    }
+                        if (EnsureStarted(true))
+                        {
+                            IDictionary<string, object> account = SendRequest("account/read",
+                                ObjectOf("refreshToken", false));
+                            IDictionary<string, object> rateLimits = SendRequest("account/rateLimits/read", null);
+                            if (TryParseTrustedSnapshot(account, rateLimits, usage))
+                            {
+                                usage.AccountTokensChecked = true;
+                                IDictionary<string, object> accountFields = ReadObject(account, "account");
+                                string identity = ReadString(accountFields, "accountId");
+                                if (String.IsNullOrWhiteSpace(identity))
+                                {
+                                    identity = ReadString(accountFields, "email");
+                                    if (identity != null) identity = identity.Trim().ToLowerInvariant();
+                                }
+                                usage.AccountTokenIdentity = AccountTokenPolicy.Identity(identity);
+                                IDictionary<string, object> tokenUsage = SendRequest("account/usage/read", null);
+                                if (tokenUsage != null)
+                                    ParseTokenUsage(tokenUsage, usage);
 
-                    usage.AccountTokensChecked = true;
-                    IDictionary<string, object> accountFields = ReadObject(account, "account");
-                    string identity = ReadString(accountFields, "accountId");
-                    if (String.IsNullOrWhiteSpace(identity))
+                                usage.Source = "Codex CLI app-server";
+                                usage.UpdatedUtc = DateTime.UtcNow;
+                                return true;
+                            }
+                            if (String.IsNullOrWhiteSpace(LastError))
+                                LastError = "Codex app-server 没有返回可验证的登录账户与额度窗口";
+                        }
+                    }
+                    catch (Exception exception)
                     {
-                        identity = ReadString(accountFields, "email");
-                        if (identity != null) identity = identity.Trim().ToLowerInvariant();
+                        LastError = exception.Message;
                     }
-                    usage.AccountTokenIdentity = AccountTokenPolicy.Identity(identity);
-                    IDictionary<string, object> tokenUsage = SendRequest("account/usage/read", null);
-                    if (tokenUsage != null)
-                        ParseTokenUsage(tokenUsage, usage);
-
-                    usage.Source = "Codex CLI app-server";
-                    usage.UpdatedUtc = DateTime.UtcNow;
-                    return true;
-                }
-                catch (Exception exception)
-                {
-                    LastError = exception.Message;
                     ResetProcess();
-                    return false;
                 }
+                return false;
             }
         }
 
-        private bool EnsureStarted()
+        private bool EnsureStarted(bool requireChatGptAuth = true)
         {
-            if (process != null && !process.HasExited && initialized)
+            string desiredCodexHome = ResolveEffectiveCodexHome(requireChatGptAuth);
+            if (process != null && !process.HasExited && initialized &&
+                String.Equals(activeCodexHome, desiredCodexHome, StringComparison.OrdinalIgnoreCase))
                 return true;
 
             ResetProcess();
@@ -114,6 +283,8 @@ namespace CodexUsageOverlay
             startInfo.RedirectStandardError = true;
             startInfo.StandardOutputEncoding = new UTF8Encoding(false);
             startInfo.StandardErrorEncoding = new UTF8Encoding(false);
+            if (!String.IsNullOrWhiteSpace(desiredCodexHome))
+                startInfo.EnvironmentVariables["CODEX_HOME"] = desiredCodexHome;
 
             process = new Process();
             process.StartInfo = startInfo;
@@ -179,10 +350,99 @@ namespace CodexUsageOverlay
             }
             SendNotification("initialized", new Dictionary<string, object>());
             initialized = true;
+            activeCodexHome = desiredCodexHome;
             return true;
         }
 
-        private IDictionary<string, object> SendRequest(string method, object parameters)
+        private string ResolveEffectiveCodexHome(bool requireChatGptAuth)
+        {
+            string configured = Environment.GetEnvironmentVariable("CODEX_HOME");
+            string defaultHome = String.IsNullOrWhiteSpace(configured)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex")
+                : configured.Trim();
+            if (!requireChatGptAuth)
+                return defaultHome;
+
+            try
+            {
+                string authPath = Path.Combine(defaultHome, "auth.json");
+                if (File.Exists(authPath) && HasChatGptOAuthTokens(File.ReadAllText(authPath, Encoding.UTF8)))
+                    return defaultHome;
+
+                string cpaPath = Path.Combine(defaultHome, "cpa-native-oauth.json");
+                if (!File.Exists(cpaPath))
+                    return defaultHome;
+
+                IDictionary<string, object> cpa = json.DeserializeObject(File.ReadAllText(cpaPath, Encoding.UTF8)) as IDictionary<string, object>;
+                string nativeAuth = ExtractNativeOAuthJson(cpa, "native_auth");
+                if (String.IsNullOrWhiteSpace(nativeAuth))
+                    nativeAuth = ExtractNativeOAuthJson(cpa, "original_auth");
+                if (String.IsNullOrWhiteSpace(nativeAuth) || !HasChatGptOAuthTokens(nativeAuth))
+                    return defaultHome;
+
+                string bridgeHome = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "CodexQuotaPills", "NativeAuthHome");
+                Directory.CreateDirectory(bridgeHome);
+                string bridgeAuthPath = Path.Combine(bridgeHome, "auth.json");
+                bool needWrite = !File.Exists(bridgeAuthPath) ||
+                    !String.Equals(lastSyncedNativeAuthSource, nativeAuth, StringComparison.Ordinal);
+                if (!needWrite)
+                {
+                    try
+                    {
+                        if (!HasChatGptOAuthTokens(File.ReadAllText(bridgeAuthPath, Encoding.UTF8)))
+                            needWrite = true;
+                    }
+                    catch { needWrite = true; }
+                }
+                if (needWrite)
+                {
+                    string tempPath = bridgeAuthPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    File.WriteAllText(tempPath, nativeAuth, new UTF8Encoding(false));
+                    if (File.Exists(bridgeAuthPath)) File.Delete(bridgeAuthPath);
+                    File.Move(tempPath, bridgeAuthPath);
+                    lastSyncedNativeAuthSource = nativeAuth;
+                }
+                return bridgeHome;
+            }
+            catch
+            {
+                return defaultHome;
+            }
+        }
+
+        private string ExtractNativeOAuthJson(IDictionary<string, object> cpa, string key)
+        {
+            if (cpa == null) return null;
+            object value;
+            if (!cpa.TryGetValue(key, out value) || value == null) return null;
+            string text = value as string;
+            if (!String.IsNullOrWhiteSpace(text)) return text;
+            IDictionary<string, object> map = value as IDictionary<string, object>;
+            return map != null ? json.Serialize(map) : null;
+        }
+
+        private bool HasChatGptOAuthTokens(string authJsonText)
+        {
+            if (String.IsNullOrWhiteSpace(authJsonText)) return false;
+            try
+            {
+                IDictionary<string, object> parsed = json.DeserializeObject(authJsonText) as IDictionary<string, object>;
+                if (parsed == null) return false;
+                string mode = ReadString(parsed, "auth_mode");
+                if (String.Equals(mode, "apikey", StringComparison.OrdinalIgnoreCase)) return false;
+                IDictionary<string, object> tokens = ReadObject(parsed, "tokens");
+                return tokens != null && tokens.Count > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private IDictionary<string, object> SendRequest(string method, object parameters,
+            int timeoutMilliseconds = RequestTimeoutMilliseconds)
         {
             if (process == null || process.HasExited)
             {
@@ -198,7 +458,7 @@ namespace CodexUsageOverlay
                 request["params"] = parameters;
             WriteMessage(request);
 
-            DateTime deadline = DateTime.UtcNow.AddMilliseconds(RequestTimeoutMilliseconds);
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
             while (DateTime.UtcNow < deadline)
             {
                 int wait = Math.Max(1, (int)(deadline - DateTime.UtcNow).TotalMilliseconds);
@@ -275,7 +535,13 @@ namespace CodexUsageOverlay
             {
                 usage.Plan = NormalizePlan(trustedPlan);
                 usage.HasPlan = true;
+                if (!UsageTrustPolicy.IsProPlan(trustedPlan) && !usage.HasShortLimitState)
+                {
+                    usage.ShortUnlimited = false;
+                    usage.HasShortLimitState = true;
+                }
             }
+            ConfirmAbsentShortLimit(rateLimitsResult, trustedPlan, usage);
             return true;
         }
 
@@ -296,10 +562,7 @@ namespace CodexUsageOverlay
             out string quotaPlan)
         {
             quotaPlan = null;
-            object limitsValue;
-            if (!result.TryGetValue("rateLimits", out limitsValue))
-                return false;
-            IDictionary<string, object> limits = AsObject(limitsValue);
+            IDictionary<string, object> limits = SelectCodexRateLimits(result);
             if (limits == null)
                 return false;
 
@@ -321,7 +584,7 @@ namespace CodexUsageOverlay
             if (limits.TryGetValue("rateLimitReachedType", out reachedValue))
             {
                 usage.RateLimitStatus = NormalizeRateLimitStatus(reachedValue == null ? null :
-                    Convert.ToString(reachedValue, CultureInfo.InvariantCulture));
+                    Convert.ToString(reachedValue, CultureInfo.InvariantCulture), primary, secondary);
                 usage.HasRateLimitStatus = true;
             }
 
@@ -384,6 +647,43 @@ namespace CodexUsageOverlay
             return true;
         }
 
+        private static IDictionary<string, object> SelectCodexRateLimits(IDictionary<string, object> result)
+        {
+            if (result == null) return null;
+            IDictionary<string, object> byId = ReadObject(result, "rateLimitsByLimitId");
+            IDictionary<string, object> codex = ReadObject(byId, "codex");
+            return codex ?? ReadObject(result, "rateLimits");
+        }
+
+        private static void ConfirmAbsentShortLimit(IDictionary<string, object> result,
+            string trustedPlan, UsageData usage)
+        {
+            if (!UsageTrustPolicy.IsProPlan(trustedPlan)) return;
+            IDictionary<string, object> limits = SelectCodexRateLimits(result);
+            if (limits == null) return;
+            object primary;
+            object secondary;
+            // A partial response or an unreadable non-null window is not evidence
+            // that a limit has been removed. Require the complete two-slot shape.
+            if (!limits.TryGetValue("primary", out primary) ||
+                !limits.TryGetValue("secondary", out secondary)) return;
+            IDictionary<string, object> weekly = primary == null ? AsObject(secondary) :
+                (secondary == null ? AsObject(primary) : null);
+            long duration;
+            double used;
+            long reset;
+            bool hasUsed = TryReadDouble(weekly, "usedPercent", out used);
+            bool hasReset = TryReadLong(weekly, "resetsAt", out reset);
+            if (!TryReadLong(weekly, "windowDurationMins", out duration) || duration != 10080 ||
+                !UsageTrustPolicy.IsRealQuotaWindow(duration, hasUsed, used, hasReset, reset)) return;
+            usage.ShortUnlimited = true;
+            usage.HasShortLimitState = true;
+            usage.ShortRemaining = null;
+            usage.HasShortRemaining = false;
+            usage.ShortResetText = "—";
+            usage.HasShortResetText = false;
+        }
+
         internal static bool ParseQuotaWindow(IDictionary<string, object> window, UsageData usage,
             out string windowPlan)
         {
@@ -403,11 +703,16 @@ namespace CodexUsageOverlay
 
             windowPlan = ReadString(window, "planType");
             bool shortWindow = durationMinutes < 1440;
+            if (shortWindow)
+            {
+                usage.ShortUnlimited = false;
+                usage.HasShortLimitState = true;
+            }
             if (hasUsedPercent && !Double.IsNaN(usedPercent) &&
                 !Double.IsInfinity(usedPercent) && usedPercent >= 0d)
             {
-                int remaining = (int)Math.Floor(100d - usedPercent + 0.0001d);
-                remaining = Math.Max(0, Math.Min(100, remaining));
+                int remaining = (int)Math.Floor(Math.Max(0d,
+                    Math.Min(100d, 100d - usedPercent + 0.0001d)));
                 if (shortWindow)
                 {
                     usage.ShortRemaining = remaining;
@@ -420,7 +725,7 @@ namespace CodexUsageOverlay
                 }
             }
 
-            if (hasResetAt && resetsAt > 0)
+            if (hasResetAt && ResetCreditDetails.IsValidExpiry(resetsAt))
             {
                 DateTime resetLocal = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
                     .AddSeconds(resetsAt).ToLocalTime();
@@ -441,17 +746,26 @@ namespace CodexUsageOverlay
             return true;
         }
 
-        private static string NormalizeRateLimitStatus(string reachedType)
+        private static string NormalizeRateLimitStatus(string reachedType,
+            IDictionary<string, object> primary, IDictionary<string, object> secondary)
         {
             if (String.IsNullOrWhiteSpace(reachedType) ||
                 String.Equals(reachedType, "none", StringComparison.OrdinalIgnoreCase))
                 return "正常";
 
             string normalized = reachedType.Trim().ToLowerInvariant();
-            if (normalized.Contains("primary")) return "短期受限";
-            if (normalized.Contains("secondary")) return "周额度受限";
+            if (normalized.Contains("primary")) return WindowReachedStatus(primary);
+            if (normalized.Contains("secondary")) return WindowReachedStatus(secondary);
             if (normalized.Contains("credit")) return "积分不足";
             return reachedType.Trim();
+        }
+
+        private static string WindowReachedStatus(IDictionary<string, object> window)
+        {
+            long duration;
+            if (!TryReadLong(window, "windowDurationMins", out duration) || duration <= 0)
+                return "额度受限";
+            return duration < 1440 ? "短期受限" : "周额度受限";
         }
 
         private static bool ParseTokenUsage(IDictionary<string, object> result, UsageData usage)
@@ -630,6 +944,7 @@ namespace CodexUsageOverlay
         private void ResetProcess()
         {
             initialized = false;
+            activeCodexHome = String.Empty;
             if (inputWriter != null)
             {
                 try { inputWriter.Dispose(); } catch { }

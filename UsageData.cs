@@ -8,6 +8,10 @@ namespace CodexUsageOverlay
     {
         public string Plan = "ChatGPT";
         public bool HasPlan;
+        // A missing percentage is unknown; only a verified complete quota snapshot
+        // can establish that this plan has no five-hour limit.
+        public bool ShortUnlimited;
+        public bool HasShortLimitState;
         public int? ShortRemaining;
         public bool HasShortRemaining;
         public string ShortResetText = "待刷新";
@@ -77,6 +81,23 @@ namespace CodexUsageOverlay
                 {
                     target.HasShortRemaining = true;
                     changed = true;
+                }
+            }
+            if (incoming.HasShortLimitState)
+            {
+                if (!target.HasShortLimitState || target.ShortUnlimited != incoming.ShortUnlimited)
+                    changed = true;
+                target.ShortUnlimited = incoming.ShortUnlimited;
+                target.HasShortLimitState = true;
+                if (incoming.ShortUnlimited)
+                {
+                    if (target.ShortRemaining.HasValue || target.HasShortRemaining ||
+                        target.ShortResetText != "—" || target.HasShortResetText)
+                        changed = true;
+                    target.ShortRemaining = null;
+                    target.HasShortRemaining = false;
+                    target.ShortResetText = "—";
+                    target.HasShortResetText = false;
                 }
             }
             if (incoming.HasShortResetText)
@@ -245,14 +266,21 @@ namespace CodexUsageOverlay
 
     internal static class UsageDisplayText
     {
+        internal static string FormatPlan(string plan)
+        {
+            if (String.IsNullOrWhiteSpace(plan)) return "CHATGPT";
+            // Keep the service's raw plan in UsageData; only its display label is
+            // normalized. prolite is the service identifier for a Pro tier.
+            if (UsageTrustPolicy.IsProPlan(plan)) return "PRO";
+            return plan.Trim().ToUpperInvariant();
+        }
+
         internal static string Build(UsageData usage, int availableTextWidth)
         {
             if (usage == null)
                 return "Codex 用量正在载入";
 
-            string planLabel = String.IsNullOrWhiteSpace(usage.Plan)
-                ? "CHATGPT"
-                : usage.Plan.ToUpperInvariant();
+            string planLabel = FormatPlan(usage.Plan);
             string weeklyRemaining = FormatRemaining(
                 usage.WeeklyRemaining, usage.RateLimitStatus != "待刷新");
             string resetText = FormatResetText(usage.WeeklyResetText);

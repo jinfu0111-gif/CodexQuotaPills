@@ -78,6 +78,30 @@ namespace CodexUsageOverlay
             response = Obj("rateLimits", Obj("primary", QuotaWindow(Double.NaN, now + 1)));
             Assert(!AutoResumePolicy.Quota(response, now).Ready, "NaN authorized resume");
             Assert(!AutoResumePolicy.Quota(null, now).Ready, "missing quota authorized resume");
+
+            // Pro now supplies its weekly allowance as primary, without a 5h
+            // window. Validate the actual shape without inventing a short quota.
+            var proBucket = Obj("planType", "prolite", "primary", Obj("usedPercent", 0,
+                "resetsAt", now + 6000, "windowDurationMins", 10080), "secondary", null,
+                "spendControlReached", false, "individualLimit", null, "rateLimitReachedType", null);
+            response = Obj("rateLimits", proBucket, "rateLimitsByLimitId", Obj("codex", proBucket));
+            Assert(AutoResumePolicy.Quota(response, now).Ready, "Pro single-week quota requires a nonexistent 5h window");
+            var proWindow = ResumeJson.Map(proBucket["primary"]);
+            proWindow["usedPercent"] = 100;
+            q = AutoResumePolicy.Quota(response, now);
+            Assert(!q.Ready && q.RetryAt == now + 6060, "Pro weekly exhaustion authorized resume");
+            proWindow["usedPercent"] = 0;
+            proWindow["resetsAt"] = now - 1;
+            Assert(!AutoResumePolicy.Quota(response, now).Ready, "stale Pro weekly snapshot authorized resume");
+            proWindow["resetsAt"] = now + 6000;
+            proBucket["spendControlReached"] = true;
+            Assert(!AutoResumePolicy.Quota(response, now).Ready, "Pro spend control bypassed");
+            proBucket["spendControlReached"] = false;
+            proBucket["individualLimit"] = Obj("usedPercent", 100);
+            Assert(!AutoResumePolicy.Quota(response, now).Ready, "Pro individual limit bypassed");
+            proBucket["individualLimit"] = null;
+            proBucket["rateLimitReachedType"] = "rate_limit_reached";
+            Assert(!AutoResumePolicy.Quota(response, now).Ready, "Pro server quota restriction bypassed");
         }
         internal static void IntentSurvivesRestartAndCancellation()
         {

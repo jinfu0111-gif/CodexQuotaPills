@@ -20,6 +20,13 @@ namespace CodexUsageOverlay
                 !String.Equals(planType.Trim(), "unknown", StringComparison.OrdinalIgnoreCase);
         }
 
+        internal static bool IsProPlan(string planType)
+        {
+            string plan = (planType ?? String.Empty).Trim();
+            return String.Equals(plan, "pro", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(plan, "prolite", StringComparison.OrdinalIgnoreCase);
+        }
+
         internal static string SelectTrustedPlan(string quotaPlan, string accountPlan)
         {
             if (IsUsablePlan(quotaPlan))
@@ -35,7 +42,7 @@ namespace CodexUsageOverlay
 
             bool usablePercent = hasUsedPercent && !Double.IsNaN(usedPercent) &&
                 !Double.IsInfinity(usedPercent) && usedPercent >= 0d;
-            bool usableReset = hasResetAt && resetAt > 0;
+            bool usableReset = hasResetAt && ResetCreditDetails.IsValidExpiry(resetAt);
             return usablePercent || usableReset;
         }
     }

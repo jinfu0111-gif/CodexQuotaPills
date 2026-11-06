@@ -58,6 +58,15 @@ namespace CodexUsageOverlay
                 }
             foreach (string argument in args)
             {
+                if (argument.StartsWith("--export-pro-preview=", StringComparison.Ordinal))
+                {
+                    ComposerUsagePillLayout.ExportPreview(argument.Substring("--export-pro-preview=".Length).Trim('"'),
+                        null, 450, new UsageData { Plan = "prolite", HasPlan = true,
+                            ShortUnlimited = true, HasShortLimitState = true,
+                            WeeklyRemaining = 100, HasWeeklyRemaining = true,
+                            ProfileTokensText = "27.2亿", AvailableResetCredits = 2 });
+                    return 0;
+                }
                 if (argument.StartsWith("--sidebar-layout-readonly=", StringComparison.Ordinal))
                 {
                     IntPtr handle = CodexWindow.Find();
@@ -86,6 +95,46 @@ namespace CodexUsageOverlay
                 }
             }
             PopupUiContext.Dark = Array.IndexOf(args, "--preview-dark") >= 0;
+            foreach (string argument in args)
+                if (argument.StartsWith("--reset-credits-readonly-check=", StringComparison.Ordinal))
+                {
+                    using (CodexAppServerClient client = new CodexAppServerClient())
+                    {
+                        ResetCreditInventory inventory;
+                        bool ok = client.TryReadResetCredits(out inventory);
+                        System.Collections.Generic.List<string> report = new System.Collections.Generic.List<string> {
+                            "InventoryVerified=" + ok, "ConsumeRequestsSent=0", "ServicesCreated=0" };
+                        if (ok)
+                        {
+                            report.Add("AvailableCount=" + inventory.AvailableCount);
+                            report.Add("HasDetails=" + inventory.HasDetails);
+                            report.Add("KnownCards=" + inventory.Credits.Length);
+                            report.Add("ReadUtc=" + inventory.ReadUtc.ToString("o", CultureInfo.InvariantCulture));
+                            int index = 0;
+                            foreach (ResetCreditRecord card in inventory.Credits)
+                            {
+                                index++;
+                                string expiry = card.ExpiresAt.HasValue ? DateTimeOffset.FromUnixTimeSeconds(card.ExpiresAt.Value)
+                                    .ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture) : "unknown";
+                                string automatic = card.ExpiresAt.HasValue ? DateTimeOffset.FromUnixTimeSeconds(card.ExpiresAt.Value - 600)
+                                    .ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture) : "unknown";
+                                report.Add("Card" + index + "Expiry=" + expiry);
+                                report.Add("Card" + index + "AutoUseFrom=" + automatic);
+                            }
+                        }
+                        File.WriteAllLines(argument.Substring("--reset-credits-readonly-check=".Length).Trim('"'), report.ToArray(), new UTF8Encoding(false));
+                        return ok ? 0 : 1;
+                    }
+                }
+            foreach (string argument in args)
+                if (argument.StartsWith("--export-auto-reset-credits-preview=", StringComparison.Ordinal))
+                {
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    using (AutoResetCreditsForm form = new AutoResetCreditsForm(null, new Rectangle(0, 0, 400, 30)))
+                        form.ExportPreview(argument.Substring("--export-auto-reset-credits-preview=".Length).Trim('"'));
+                    return 0;
+                }
             foreach (string argument in args)
                 if (argument.StartsWith("--export-session-usage-preview=", StringComparison.Ordinal))
                 {
@@ -278,6 +327,8 @@ namespace CodexUsageOverlay
                         String.Format(CultureInfo.InvariantCulture, "CodexWindow={0}", window != IntPtr.Zero ? "found" : "not-found"),
                         "DataSource=" + data.Source,
                         "Plan=" + data.Plan,
+                        "DisplayPlan=" + UsageDisplayText.FormatPlan(data.Plan),
+                        "ShortLimitState=" + (data.HasShortLimitState ? (data.ShortUnlimited ? "unlimited" : "limited") : "unknown"),
                         "ShortRemaining=" + (data.ShortRemaining.HasValue ? data.ShortRemaining.Value.ToString(CultureInfo.InvariantCulture) : "unknown"),
                         "ShortReset=" + data.ShortResetText,
                         "WeeklyRemaining=" + (data.WeeklyRemaining.HasValue ? data.WeeklyRemaining.Value.ToString(CultureInfo.InvariantCulture) : "unknown"),
@@ -430,6 +481,7 @@ namespace CodexUsageOverlay
         private readonly string[] fontOptions;
         private readonly CodexTaskStatusMonitor taskStatusMonitor;
         private readonly AutoResumeService autoResumeService;
+        private readonly AutoResetCreditsService autoResetCreditsService;
         private SessionUsageEntry selectedUsageEntry;
         private readonly NotifyIcon resetNotifyIcon;
         private readonly GitHubReleaseUpdateService releaseUpdateService;
@@ -455,6 +507,10 @@ namespace CodexUsageOverlay
         private bool updateAvailable;
         private string lastPreferredWidthRevision = String.Empty;
         private int preferredOverlayLogicalWidth = 720;
+        private string lastCompactWidthRevision = String.Empty;
+        private int cachedCompactLogicalWidth = 110;
+        private string lastPillTextsRevision = String.Empty;
+        private ComposerUsagePillKind hoveredPillKind = ComposerUsagePillKind.None;
         private DateTime? manualUpdateCheckRequestedUtc;
         private DateTimeOffset? resetRadarDisplayNow;
         private float dpiScale = 1f;
@@ -505,6 +561,7 @@ namespace CodexUsageOverlay
             fontOptions = BuildFontOptions(settings.FontName);
             taskStatusMonitor = new CodexTaskStatusMonitor();
             autoResumeService = new AutoResumeService(resumeReadOnly);
+            autoResetCreditsService = new AutoResetCreditsService(resumeReadOnly);
             resetRadarService = new ResetRadarService();
             resetRadar = resetRadarService.Snapshot();
             radarBannerPolicy = new ResetRadarBannerPolicy(Path.Combine(
@@ -591,6 +648,7 @@ namespace CodexUsageOverlay
                 timer.Dispose();
                 taskStatusMonitor.Dispose();
                 autoResumeService.Dispose();
+                autoResetCreditsService.Dispose();
                 resetRadarService.Dispose();
                 releaseUpdateService.Dispose();
                 if (guideBubble != null)
@@ -681,6 +739,7 @@ namespace CodexUsageOverlay
                 NativeMethods.UnhookWinEvent(windowMoveHook); windowMoveHook = IntPtr.Zero;
             }
             composerVisibility.SetMoving(false, DateTime.UtcNow);
+            composerProbe.SetMoving(false);
             if (windowLocationHook != IntPtr.Zero)
             {
                 NativeMethods.UnhookWinEvent(windowLocationHook);
@@ -709,6 +768,7 @@ namespace CodexUsageOverlay
                 (eventType == NativeMethods.EVENT_SYSTEM_MOVESIZESTART || eventType == NativeMethods.EVENT_SYSTEM_MOVESIZEEND))
             {
                 composerVisibility.SetMoving(eventType == NativeMethods.EVENT_SYSTEM_MOVESIZESTART, DateTime.UtcNow);
+                composerProbe.SetMoving(eventType == NativeMethods.EVENT_SYSTEM_MOVESIZESTART);
                 return;
             }
             if (hWnd == IntPtr.Zero || hWnd != codexWindow ||
@@ -729,7 +789,10 @@ namespace CodexUsageOverlay
             Rectangle sidebar = PopupUiContext.Sidebar;
             if (!sidebar.IsEmpty)
                 sidebar = new Rectangle(window.Location, new Size(sidebar.Width, window.Height));
-            Rectangle desired = ResolveOverlayBounds(window, targetScreen.WorkingArea, new Size(Width, Height), sidebar);
+                        int fastPreferredWidth = settings.Placement == OverlayPlacement.ComposerBottom && !settingsExpanded && cachedCompactLogicalWidth > 0
+                ? ScalePixels(cachedCompactLogicalWidth)
+                : Width;
+            Rectangle desired = ResolveOverlayBounds(window, targetScreen.WorkingArea, new Size(fastPreferredWidth, Height), sidebar);
             if (desired.IsEmpty)
             {
                 quotaHoverCard.HideCard(); placementSelector.HideSelector(); resetRadarBanner.HideBanner();
@@ -825,12 +888,17 @@ namespace CodexUsageOverlay
                 return;
             }
             // Focus loss closes transient UI, but never resets/hides the capsule.
-            // Its normal z-order lets the foreground application cover only overlap.
+            // Keep hover card / selector alive while the pointer is actively over them.
+            bool pointerInteracting = IsPointerInteractingWithOverlay();
             if (!settingsExpanded && foregroundWindow != codexWindow &&
                 !guideHasFocus && !menuHasFocus && !PopupUiContext.OwnsForeground(foregroundWindow))
             {
                 if (updateMenu.Visible) updateMenu.Close();
-                quotaHoverCard.HideCard(); placementSelector.HideSelector();
+                if (!pointerInteracting)
+                {
+                    quotaHoverCard.HideCard();
+                    placementSelector.HideSelector();
+                }
                 resetRadarBanner.HideBanner(); HideGuideBubble();
             }
 
@@ -942,20 +1010,24 @@ namespace CodexUsageOverlay
                 radarClockRevision,
                 lastRadarClockRevision,
                 StringComparison.Ordinal);
+            string pillTextsRevision = settingsExpanded
+                ? String.Empty
+                : settings.Placement.ToString() + "|" + String.Join("|", ComposerUsagePillLayout.BuildTexts(usage, settings));
+            bool pillTextsChanged = !String.Equals(pillTextsRevision, lastPillTextsRevision, StringComparison.Ordinal);
             if (becameVisible || boundsChanged || dpiChanged || themeChanged || taskStateChanged || radarChanged ||
-                updateAvailabilityChanged ||
+                updateAvailabilityChanged || pillTextsChanged ||
                 radarClockChanged || !String.Equals(displayText, lastRenderedText, StringComparison.Ordinal))
             {
                 RenderLayered();
                 lastRenderedText = displayText;
+                lastPillTextsRevision = pillTextsRevision;
                 lastRadarClockRevision = radarClockRevision;
             }
             PopupUiContext.Anchor = PlanPillScreenBounds(null);
             // Render first: every popup, including onboarding, now uses the same
             // actual plan control. The guide binder is its only positioning timer.
             UpdateGuideBubble();
-            if (quotaHoverCard.Visible)
-                UpdateComposerTooltip(ToLogicalPoint(PointToClient(Cursor.Position)), PointToClient(Cursor.Position));
+            SyncPointerHoverState();
             if (themeChanged && placementSelector.Visible)
                 placementSelector.ShowSelector(settings.Placement, PopupUiContext.Anchor,
                     targetScreen.WorkingArea, dpiScale, Handle, settings);
@@ -982,11 +1054,18 @@ namespace CodexUsageOverlay
             if (!settingsExpanded)
             {
                 if (settings.Placement == OverlayPlacement.Sidebar) return ComposerUsagePillLayout.SidebarWidth;
+                string compactRevision = String.Join("|", ComposerUsagePillLayout.BuildTexts(usage, settings));
+                if (String.Equals(compactRevision, lastCompactWidthRevision, StringComparison.Ordinal))
+                    return cachedCompactLogicalWidth;
                 using (Bitmap canvas = UiRendering.CreateLayeredBitmap(1, 1))
                 using (Graphics graphics = Graphics.FromImage(canvas))
                 using (Font font = UiRendering.CreateTextFont(
                     "Microsoft YaHei UI", 8f, FontStyle.Regular))
-                    return Math.Min(680, ComposerUsagePillLayout.MeasureWidth(usage, graphics, font, settings));
+                {
+                    cachedCompactLogicalWidth = Math.Min(680, ComposerUsagePillLayout.MeasureWidth(usage, graphics, font, settings));
+                    lastCompactWidthRevision = compactRevision;
+                    return cachedCompactLogicalWidth;
+                }
             }
 
             const int defaultWidth = 720;
@@ -1066,7 +1145,7 @@ namespace CodexUsageOverlay
                         composerPillLayout = layout;
                         composerRefreshBounds = layout.RefreshBounds;
                         ComposerUsagePillLayout.Draw(
-                            graphics, layout, composerFont, gearHovered, gearPressed);
+                            graphics, layout, composerFont, gearHovered, gearPressed, hoveredPillKind);
                     }
                     return bitmap;
                 }
@@ -1927,17 +2006,20 @@ namespace CodexUsageOverlay
         {
             base.OnMouseMove(e);
             Point logicalLocation = ToLogicalPoint(e.Location);
+            ComposerUsagePillKind nextHoveredPill = ResolveHoveredPillKind(logicalLocation);
             UpdateComposerTooltip(logicalLocation, e.Location);
             Cursor = CursorForPoint(logicalLocation);
             bool hovered = GearBounds.Contains(logicalLocation);
             bool resetHovered = ResetRadarBounds.Contains(logicalLocation) ||
                 (settingsExpanded && ResetSourceBounds.Contains(logicalLocation));
             bool refreshHovered = RadarRefreshBounds.Contains(logicalLocation);
-            if (hovered != gearHovered || resetHovered != radarHovered || refreshHovered != radarRefreshHovered)
+            if (hovered != gearHovered || resetHovered != radarHovered ||
+                refreshHovered != radarRefreshHovered || nextHoveredPill != hoveredPillKind)
             {
                 gearHovered = hovered;
                 radarHovered = resetHovered;
                 radarRefreshHovered = refreshHovered;
+                hoveredPillKind = nextHoveredPill;
                 RefreshInlinePanel();
             }
         }
@@ -1947,14 +2029,71 @@ namespace CodexUsageOverlay
             base.OnMouseLeave(e);
             Cursor = Cursors.Default;
             HideComposerTooltip();
-            if (gearHovered || gearPressed || radarHovered || radarRefreshHovered)
+            if (gearHovered || gearPressed || radarHovered || radarRefreshHovered ||
+                hoveredPillKind != ComposerUsagePillKind.None)
             {
                 gearHovered = false;
                 gearPressed = false;
                 radarHovered = false;
                 radarRefreshHovered = false;
+                hoveredPillKind = ComposerUsagePillKind.None;
                 RefreshInlinePanel();
             }
+        }
+
+        private void SyncPointerHoverState()
+        {
+            if (!Visible || settingsExpanded || composerPillLayout == null)
+            {
+                if (hoveredPillKind != ComposerUsagePillKind.None)
+                {
+                    hoveredPillKind = ComposerUsagePillKind.None;
+                    RenderLayered();
+                }
+                return;
+            }
+
+            Point screenPoint = Cursor.Position;
+            if (!Bounds.Contains(screenPoint))
+            {
+                if (hoveredPillKind != ComposerUsagePillKind.None)
+                {
+                    hoveredPillKind = ComposerUsagePillKind.None;
+                    RenderLayered();
+                }
+                if (quotaHoverCard.Visible)
+                    HideComposerTooltip();
+                return;
+            }
+
+            Point clientPoint = PointToClient(screenPoint);
+            Point logicalPoint = ToLogicalPoint(clientPoint);
+            ComposerUsagePillKind nextHoveredPill = ResolveHoveredPillKind(logicalPoint);
+            if (nextHoveredPill != hoveredPillKind)
+            {
+                hoveredPillKind = nextHoveredPill;
+                RenderLayered();
+            }
+            UpdateComposerTooltip(logicalPoint, clientPoint);
+        }
+
+        private bool IsPointerInteractingWithOverlay()
+        {
+            Point pointer = Cursor.Position;
+            if (placementSelector.Visible)
+            {
+                Rectangle selectorBounds = placementSelector.Bounds;
+                selectorBounds.Inflate(ScalePixels(6), ScalePixels(6));
+                if (selectorBounds.Contains(pointer))
+                    return true;
+            }
+            if (Visible && Bounds.Contains(pointer))
+            {
+                Point logical = ToLogicalPoint(PointToClient(pointer));
+                if (IsComposerPointerTarget(logical))
+                    return true;
+            }
+            return false;
         }
 
         private Point ToLogicalPoint(Point physicalPoint)
@@ -1966,6 +2105,12 @@ namespace CodexUsageOverlay
         {
             if (!exitWhenCodexStops)
                 return false;
+
+            if (codexWindow != IntPtr.Zero && NativeMethods.IsWindow(codexWindow))
+            {
+                codexMissingSinceUtc = null;
+                return false;
+            }
 
             DateTime utcNow = DateTime.UtcNow;
             if (utcNow < nextCodexProcessCheckUtc)
@@ -1980,11 +2125,48 @@ namespace CodexUsageOverlay
                 codexMissingSinceUtc, utcNow, TimeSpan.FromSeconds(2));
         }
 
+        private ComposerUsagePill FindInteractivePill(Point logicalLocation)
+        {
+            if (settingsExpanded || composerPillLayout == null)
+                return null;
+            ComposerUsagePill exact = composerPillLayout.HitTest(logicalLocation);
+            if (exact != null)
+                return exact;
+            ComposerUsagePill plan = FindPlanPill(logicalLocation, true);
+            if (plan != null)
+                return plan;
+            foreach (ComposerUsagePill candidate in composerPillLayout.Pills)
+            {
+                if (!IsComposerTooltipKind(candidate.Kind) &&
+                    !ComposerUsagePillLayout.OpensSessionUsage(settings.Placement, candidate.Kind))
+                    continue;
+                Rectangle forgiving = candidate.Bounds;
+                forgiving.Inflate(2, 2);
+                if (forgiving.Contains(logicalLocation))
+                    return candidate;
+            }
+            return null;
+        }
+
+        private ComposerUsagePillKind ResolveHoveredPillKind(Point logicalLocation)
+        {
+            if (settingsExpanded || composerPillLayout == null)
+                return ComposerUsagePillKind.None;
+            ComposerUsagePill pill = FindInteractivePill(logicalLocation);
+            if (pill == null)
+                return ComposerUsagePillKind.None;
+            if (pill.Kind == ComposerUsagePillLayout.MenuKind(settings.Placement) ||
+                IsComposerTooltipKind(pill.Kind) ||
+                ComposerUsagePillLayout.OpensSessionUsage(settings.Placement, pill.Kind))
+                return pill.Kind;
+            return ComposerUsagePillKind.None;
+        }
+
         private bool IsComposerHoverTarget(Point logicalLocation)
         {
             if (settingsExpanded || composerPillLayout == null)
                 return false;
-            ComposerUsagePill pill = composerPillLayout.HitTest(logicalLocation);
+            ComposerUsagePill pill = FindInteractivePill(logicalLocation);
             return pill != null && IsComposerTooltipKind(pill.Kind);
         }
 
@@ -1997,7 +2179,7 @@ namespace CodexUsageOverlay
         {
             if (settingsExpanded || composerPillLayout == null)
                 return false;
-            ComposerUsagePill pill = composerPillLayout.HitTest(logicalLocation);
+            ComposerUsagePill pill = FindInteractivePill(logicalLocation);
             return FindPlanPill(logicalLocation, true) != null ||
                 (pill != null && (IsComposerTooltipKind(pill.Kind) ||
                     ComposerUsagePillLayout.OpensSessionUsage(settings.Placement, pill.Kind)));
@@ -2007,11 +2189,7 @@ namespace CodexUsageOverlay
         {
             bool clickable = OverlayInteraction.IsHeaderInteractive(location, ResetRadarBounds, GearBounds);
             if (!settingsExpanded && composerPillLayout != null)
-            {
-                ComposerUsagePill pill = composerPillLayout.HitTest(location);
-                clickable |= FindPlanPill(location, true) != null ||
-                    (pill != null && ComposerUsagePillLayout.OpensSessionUsage(settings.Placement, pill.Kind));
-            }
+                clickable |= IsComposerPointerTarget(location);
             if (settingsExpanded && draftSettings != null)
             {
                 foreach (Rectangle bounds in new[] { ResetNotificationBounds, ResetSourceBounds,
@@ -2042,7 +2220,7 @@ namespace CodexUsageOverlay
                 return;
             }
 
-            ComposerUsagePill pill = composerPillLayout.HitTest(logicalLocation);
+            ComposerUsagePill pill = FindInteractivePill(logicalLocation);
             if (pill == null || !IsComposerTooltipKind(pill.Kind))
             {
                 HideComposerTooltip();
@@ -2177,6 +2355,11 @@ namespace CodexUsageOverlay
             else if (action == PlacementMenuAction.AutoResume)
             {
                 using (AutoResumeForm form = new AutoResumeForm(autoResumeService, PlanPillScreenBounds(null)))
+                    form.ShowDialog(this);
+            }
+            else if (action == PlacementMenuAction.AutoResetCredits)
+            {
+                using (AutoResetCreditsForm form = new AutoResetCreditsForm(autoResetCreditsService, PlanPillScreenBounds(null)))
                     form.ShowDialog(this);
             }
         }
@@ -2712,21 +2895,49 @@ namespace CodexUsageOverlay
 
     internal static class CodexWindow
     {
+        private static IntPtr cachedChatGptHwnd = IntPtr.Zero;
+        private static uint cachedChatGptPid;
+        private static uint cachedRejectedPid;
+
         internal static bool IsCandidate(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd) ||
                 !NativeMethods.IsWindowVisible(hwnd) || NativeMethods.IsIconic(hwnd))
                 return false;
+            uint processId;
+            NativeMethods.GetWindowThreadProcessId(hwnd, out processId);
+            if (processId == 0)
+                return false;
+            if (hwnd == cachedChatGptHwnd && processId == cachedChatGptPid)
+                return true;
+
             StringBuilder className = new StringBuilder(256);
             GetClassName(hwnd, className, className.Capacity);
             if (className.ToString() != "Chrome_WidgetWin_1")
                 return false;
-            uint processId;
-            NativeMethods.GetWindowThreadProcessId(hwnd, out processId);
+            if (processId == cachedChatGptPid)
+            {
+                cachedChatGptHwnd = hwnd;
+                return true;
+            }
+            if (processId == cachedRejectedPid)
+                return false;
             try
             {
                 using (Process process = Process.GetProcessById((int)processId))
-                    return String.Equals(process.ProcessName, "ChatGPT", StringComparison.OrdinalIgnoreCase);
+                {
+                    bool isChatGpt = String.Equals(process.ProcessName, "ChatGPT", StringComparison.OrdinalIgnoreCase);
+                    if (isChatGpt)
+                    {
+                        cachedChatGptPid = processId;
+                        cachedChatGptHwnd = hwnd;
+                    }
+                    else
+                    {
+                        cachedRejectedPid = processId;
+                    }
+                    return isChatGpt;
+                }
             }
             catch { return false; }
         }
@@ -2744,19 +2955,6 @@ namespace CodexUsageOverlay
             {
                 if (!IsCandidate(hwnd))
                     return true;
-
-                uint processId;
-                NativeMethods.GetWindowThreadProcessId(hwnd, out processId);
-                try
-                {
-                    Process process = Process.GetProcessById((int)processId);
-                    if (!String.Equals(process.ProcessName, "ChatGPT", StringComparison.OrdinalIgnoreCase))
-                        return true;
-                }
-                catch
-                {
-                    return true;
-                }
 
                 result = hwnd;
                 return false;
@@ -2792,6 +2990,11 @@ namespace CodexUsageOverlay
                     {
                         result.ShortRemaining = number;
                         result.HasShortRemaining = true;
+                    }
+                    else if (key == "ShortLimitState" && (value == "unlimited" || value == "limited"))
+                    {
+                        result.HasShortLimitState = true;
+                        result.ShortUnlimited = value == "unlimited";
                     }
                     else if (key == "ShortReset" && value.Length > 0)
                     {
@@ -2855,6 +3058,22 @@ namespace CodexUsageOverlay
             catch
             {
             }
+            if (result.HasShortLimitState && result.ShortUnlimited)
+            {
+                // Persist only a previously confirmed Pro state, never infer it from an old plan name.
+                if (!UsageTrustPolicy.IsProPlan(result.Plan))
+                {
+                    result.HasShortLimitState = false;
+                    result.ShortUnlimited = false;
+                }
+                else
+                {
+                    result.ShortRemaining = null;
+                    result.HasShortRemaining = false;
+                    result.ShortResetText = "—";
+                    result.HasShortResetText = false;
+                }
+            }
             return result;
         }
 
@@ -2866,6 +3085,7 @@ namespace CodexUsageOverlay
                 string[] lines = new[]
                 {
                     "Plan=" + data.Plan,
+                    "ShortLimitState=" + (data.HasShortLimitState ? (data.ShortUnlimited ? "unlimited" : "limited") : "unknown"),
                     "ShortRemaining=" + (data.ShortRemaining.HasValue ? data.ShortRemaining.Value.ToString(CultureInfo.InvariantCulture) : String.Empty),
                     "ShortReset=" + data.ShortResetText,
                     "WeeklyRemaining=" + (data.WeeklyRemaining.HasValue ? data.WeeklyRemaining.Value.ToString(CultureInfo.InvariantCulture) : String.Empty),

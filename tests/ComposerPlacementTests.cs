@@ -25,7 +25,31 @@ namespace CodexUsageOverlay
             VerifyProductionPopupScopes(assembly);
             VerifyProductionKeepsValidatedAnchor(assembly);
             VerifyProductionPermissionAnchor(assembly);
+            VerifyProductionRejectsMixedTimeCapture(assembly);
             SidebarLayoutTests.ActualAssemblyKeepsCapsuleInAppScope(assembly);
+        }
+
+        private static void VerifyProductionRejectsMixedTimeCapture(System.Reflection.Assembly assembly)
+        {
+            var stat=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic;
+            var inst=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+            Type probe=assembly.GetType("CodexUsageOverlay.ComposerWindowProbe",true);
+            var missing=probe.GetMethod("MissingComposerState",stat);
+            var complete=probe.GetMethod("CompleteCapture",stat);
+            Assert(missing!=null && complete!=null,"production still publishes partial or moving capture as confirmed absence");
+            Assert(missing.Invoke(null,new object[] { false,true }).ToString()=="Unavailable" &&
+                missing.Invoke(null,new object[] { false,false }).ToString()=="NoComposer",
+                "production does not distinguish partial recognition from confirmed absence");
+            Type snapshotType=assembly.GetType("CodexUsageOverlay.ComposerProbeSnapshot",true);
+            object snapshot=Activator.CreateInstance(snapshotType,true);
+            var state=snapshotType.GetField("State",inst);
+            state.SetValue(snapshot,Enum.Parse(state.FieldType,"NoComposer"));
+            snapshotType.GetField("ToolbarHost",inst).SetValue(snapshot,new Rectangle(540,934,140,28));
+            Rectangle moved=Window; moved.Offset(-19,23);
+            complete.Invoke(null,new object[] { snapshot,Window,moved });
+            Assert(state.GetValue(snapshot).ToString()=="Unavailable" &&
+                ((Rectangle)snapshotType.GetField("ToolbarHost",inst).GetValue(snapshot)).IsEmpty,
+                "production publishes a mixed-time host or absence after movement");
         }
 
         private static void VerifyProductionPermissionAnchor(System.Reflection.Assembly assembly)
@@ -88,6 +112,15 @@ namespace CodexUsageOverlay
             var moved = Window; moved.Offset(83, -41); shown.Offset(83, -41);
             Assert(step(600, ComposerProbeState.Composer, moved) == shown,
                 "production window translation still loses or delays its anchor");
+            var setMoving=gateType.GetMethod("SetMoving",flags);
+            setMoving.Invoke(gate,new object[] { true,start.AddMilliseconds(700) });
+            Assert(step(800,ComposerProbeState.NoComposer,moved)==shown,
+                "production native drag still trusts an in-flight false absence");
+            setMoving.Invoke(gate,new object[] { false,start.AddMilliseconds(900) });
+            Assert(step(901,ComposerProbeState.NoComposer,moved).IsEmpty,
+                "production ignored confirmed absence from a post-release capture");
+            Assert(assembly.GetType("CodexUsageOverlay.ComposerWindowProbe",true).GetMethod("SetMoving",flags)!=null,
+                "production worker cannot pause captures during native movement");
         }
 
         private static void VerifyProductionPopupScopes(System.Reflection.Assembly assembly)
@@ -376,7 +409,7 @@ namespace CodexUsageOverlay
             cached.CapturedUtc = start.AddMilliseconds(501);
             Assert(!gate.Resolve(Handle, Window, Window, Size, 1f, cached, cached.CapturedUtc, out effective).IsEmpty, "second fresh sample was not accepted");
             cached.CapturedUtc = start.AddMilliseconds(502); cached.ToolbarHost.Offset(12, 0);
-            Assert(gate.Resolve(Handle, Window, Window, Size, 1f, cached, cached.CapturedUtc, out effective).IsEmpty, "changed target moved the visible overlay immediately");
+            Assert(gate.Resolve(Handle, Window, Window, Size, 1f, cached, cached.CapturedUtc, out effective).Left == 552, "established overlay blinked instead of smoothly following toolbar shift");
             cached.CapturedUtc = start.AddMilliseconds(902);
             Assert(!gate.Resolve(Handle, Window, Window, Size, 1f, cached, cached.CapturedUtc, out effective).IsEmpty, "new stable layout failed recovery");
             gate.Reset(); cached.CapturedUtc = start.AddMilliseconds(903);
@@ -573,11 +606,17 @@ namespace CodexUsageOverlay
                 "scrolling pane dimensions reset an unchanged native toolbar");
             snapshot.CapturedUtc = start.AddMilliseconds(600);
             snapshot.LeftAnchor.Offset(-20,0); snapshot.ToolbarHost.Offset(-20,0);
-            Assert(gate.Resolve(Handle,Window,Window,Size,1f,snapshot,snapshot.CapturedUtc,out effective).IsEmpty,
-                "old capsule was pinned away from the moved permission button");
-            snapshot.CapturedUtc = start.AddMilliseconds(1000);
             Assert(gate.Resolve(Handle,Window,Window,Size,1f,snapshot,snapshot.CapturedUtc,out effective).Left==520,
-                "permission anchor move did not restore exact alignment");
+                "permission anchor move did not smoothly realign without blinking");
+            Assert(ComposerWindowProbe.IsMainContentSurfaceClass("outline-none MainContentSurface-EnuIYE MainContentLeftBorder-IFAvO_") &&
+                ComposerWindowProbe.IsMainContentSurfaceClass("_MainContentSurface_abc123") &&
+                !ComposerWindowProbe.IsMainContentSurfaceClass("MainContentLeftBorder-IFAvO_"),
+                "MainContentSurface class recognition broke");
+            Assert(ComposerWindowProbe.IsSendLabel("引导") && ComposerWindowProbe.IsSendLabel("排队") &&
+                ComposerWindowProbe.IsSendLabel("Steer") && ComposerWindowProbe.IsSendLabel("Queue") &&
+                ComposerWindowProbe.IsPermissionLabel("Change permissions, automatic review enabled") &&
+                ComposerWindowProbe.IsPermissionLabel("Approve for me"),
+                "active turn steer/queue or auto-review permission labels were rejected");
         }
 
         internal static void OverflowingComposerContainerUsesVisibleIntersection()
@@ -615,6 +654,199 @@ namespace CodexUsageOverlay
                 new Rectangle(585,1108,736,228), new Rectangle(515,334,876,888),
                 new[] {new Rectangle(1127,1170,122,28)}, new Rectangle(224,238,1171,988), 1f });
             Assert(host == new Rectangle(716,1170,407,28), "production rejects the captured overflowing contents ancestor");
+        }
+
+        internal static void CapturedDragMismatchKeepsTheValidatedAnchor()
+        {
+            // User drag, 2026-11-06, sample 41: cached context (998,1143),
+            // permission (1031,1143), send (1690,1143); the send's current bounds
+            // were (1671,1166). Replay that observed (-19,+23) translation in
+            // a later parent read. These parent rectangles are reconstructed;
+            // the button rectangles and movement delta come from the capture.
+            Rectangle window = new Rectangle(501,150,1315,1049);
+            Rectangle laterPane = window; laterPane.Offset(-19,23);
+            var elements = new[] {
+                new ComposerLayoutElement { Context=true, Bounds=new Rectangle(998,1143,29,28), Pane=window, Container=window },
+                new ComposerLayoutElement { Approval=true, Bounds=new Rectangle(1031,1143,74,28), Pane=window, Container=window },
+                new ComposerLayoutElement { Action=true, Bounds=new Rectangle(1690,1143,29,28), Pane=laterPane, Container=laterPane }
+            };
+            var incomplete = new ComposerProbeSnapshot();
+            Assert(ComposerLayoutRecognition.Select(elements,null,window,1f,incomplete)==null,
+                "captured mixed-time geometry unexpectedly formed a complete composer");
+            DateTime start = DateTime.UtcNow; OverlayPlacement effective;
+            var gate = new ComposerVisibilityGate();
+            gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start),start,out effective);
+            Rectangle shown = gate.Resolve(Handle,Window,Window,Size,1f,
+                Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(400)),start.AddMilliseconds(400),out effective);
+            var failure = Snapshot(ComposerWindowProbe.MissingComposerState(false,true),start.AddMilliseconds(500));
+            failure.ToolbarHost = Rectangle.Empty;
+            Assert(gate.Resolve(Handle,Window,Window,Size,1f,failure,start.AddMilliseconds(500),out effective)==shown,
+                "captured context/permission/send mismatch was treated as confirmed absence and hid the capsule");
+            Assert(ComposerWindowProbe.MissingComposerState(true,false)==ComposerProbeState.Unavailable &&
+                ComposerWindowProbe.MissingComposerState(true,true)==ComposerProbeState.Unavailable,
+                "partial editor/anchor recognition bypassed the temporary-failure lease");
+            Assert(gate.Resolve(Handle,Window,Window,Size,1f,failure,start.AddMilliseconds(1901),out effective).IsEmpty,
+                "partial recognition extended the 1.5 second lease");
+            Assert(gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(2000)),
+                start.AddMilliseconds(2000),out effective).IsEmpty,"expired anchor recovered without confirmation");
+            Assert(!gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(2400)),
+                start.AddMilliseconds(2400),out effective).IsEmpty,"stable independent captures did not recover");
+            failure = Snapshot(ComposerWindowProbe.MissingComposerState(false,false),start.AddMilliseconds(2500));
+            Assert(failure.State==ComposerProbeState.NoComposer && gate.Resolve(Handle,Window,Window,Size,1f,failure,
+                start.AddMilliseconds(2500),out effective).IsEmpty,"confirmed missing composer did not hide immediately");
+        }
+
+        internal static void MovingCaptureCannotPublishAbsenceOrMixedGeometry()
+        {
+            Rectangle moved=Window; moved.Offset(-19,23);
+            Rectangle resized=Window; resized.Width+=1;
+            foreach (Rectangle after in new[] { moved,resized,Rectangle.Empty })
+                foreach (ComposerProbeState state in new[] { ComposerProbeState.Composer,ComposerProbeState.NoComposer })
+                {
+                    var snapshot=Snapshot(state,DateTime.UtcNow);
+                    ComposerWindowProbe.CompleteCapture(snapshot,Window,after);
+                    Assert(snapshot.State==ComposerProbeState.Unavailable && snapshot.ToolbarHost.IsEmpty,
+                        "window changed during capture but published confirmed absence or a mixed-time host");
+                }
+            var unknown=Snapshot(ComposerProbeState.Composer,DateTime.UtcNow);
+            ComposerWindowProbe.CompleteCapture(unknown,Rectangle.Empty,Window);
+            Assert(unknown.State==ComposerProbeState.Unavailable && unknown.ToolbarHost.IsEmpty,
+                "failed initial native bounds read published a host");
+            foreach (ComposerProbeState state in new[] { ComposerProbeState.Composer,ComposerProbeState.NoComposer })
+            {
+                var snapshot=Snapshot(state,DateTime.UtcNow); snapshot.ToolbarHost=Rectangle.Empty;
+                ComposerWindowProbe.CompleteCapture(snapshot,Window,Window);
+                Assert(snapshot.State==state,"stable confirmed obstruction or absence became a transient failure");
+            }
+            DateTime start=DateTime.UtcNow; OverlayPlacement effective;
+            var gate=new ComposerVisibilityGate();
+            gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start),start,out effective);
+            Rectangle shown=gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(400)),
+                start.AddMilliseconds(400),out effective);
+            gate.SetMoving(true,start.AddMilliseconds(500));
+            var transient=Snapshot(ComposerProbeState.NoComposer,start.AddSeconds(8));
+            ComposerWindowProbe.CompleteCapture(transient,Window,moved);
+            Rectangle expected=shown; expected.Offset(-19,23);
+            Assert(gate.Resolve(Handle,moved,new Rectangle(-5000,-5000,10000,10000),Size,1f,transient,
+                start.AddSeconds(8),out effective)==expected,"moving capture erased the established relative anchor");
+            Assert(gate.Resolve(Handle,resized,Window,Size,1f,null,start.AddMilliseconds(8100),out effective).IsEmpty,
+                "resize retained the drag anchor");
+        }
+
+        internal static void NativeDragFreezesUntilPostReleaseValidation()
+        {
+            DateTime start=DateTime.UtcNow; OverlayPlacement effective;
+            var gate=new ComposerVisibilityGate();
+            gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start),start,out effective);
+            Rectangle shown=gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(400)),
+                start.AddMilliseconds(400),out effective);
+            gate.SetMoving(true,start.AddMilliseconds(500));
+            Rectangle moved=Window; moved.Offset(37,-19);
+            Rectangle expected=shown; expected.Offset(37,-19);
+            Rectangle area=new Rectangle(-5000,-5000,10000,10000);
+            foreach (ComposerProbeState state in new[] { ComposerProbeState.NoComposer,ComposerProbeState.Composer })
+            {
+                var mixed=Snapshot(state,start.AddSeconds(8)); mixed.ToolbarHost=Rectangle.Empty;
+                Assert(gate.Resolve(Handle,moved,area,Size,1f,mixed,start.AddSeconds(8),out effective)==expected,
+                    "native drag trusted an in-flight false absence/empty host instead of its verified anchor");
+            }
+            DateTime released=start.AddSeconds(8);
+            gate.SetMoving(false,released);
+            var old=Snapshot(ComposerProbeState.NoComposer,released.AddMilliseconds(-1));
+            Assert(gate.Resolve(Handle,moved,area,Size,1f,old,released.AddMilliseconds(100),out effective)==expected,
+                "pre-release snapshot erased the release grace");
+            var unavailable=Snapshot(ComposerProbeState.Unavailable,released.AddMilliseconds(700));
+            Assert(gate.Resolve(Handle,moved,area,Size,1f,unavailable,released.AddMilliseconds(750),out effective)==expected,
+                "temporary unreadability erased release grace before 750ms");
+            Assert(gate.Resolve(Handle,moved,area,Size,1f,unavailable,released.AddMilliseconds(751),out effective).IsEmpty,
+                "unavailable or old capture extended release grace");
+
+            gate=new ComposerVisibilityGate();
+            gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start),start,out effective);
+            gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(400)),
+                start.AddMilliseconds(400),out effective);
+            gate.SetMoving(true,start.AddMilliseconds(500)); gate.SetMoving(false,start.AddMilliseconds(600));
+            var fresh=Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(601)); fresh.ToolbarHost.Offset(8,0);
+            Assert(gate.Resolve(Handle,Window,Window,Size,1f,fresh,start.AddMilliseconds(601),out effective).Left==shown.Left+8,
+                "post-release valid capture failed to recalibrate");
+            gate.SetMoving(true,start.AddMilliseconds(700)); gate.SetMoving(false,start.AddMilliseconds(800));
+            fresh=Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(801)); fresh.ToolbarHost=Rectangle.Empty;
+            Assert(gate.Resolve(Handle,Window,Window,Size,1f,fresh,start.AddMilliseconds(801),out effective).IsEmpty,
+                "post-release confirmed insufficient space was ignored");
+        }
+
+        internal static void DragCannotConfirmOrCarryAnInvalidAnchor()
+        {
+            DateTime start=DateTime.UtcNow; OverlayPlacement effective;
+            var gate=new ComposerVisibilityGate();
+            gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start),start,out effective);
+            gate.SetMoving(true,start.AddMilliseconds(100));
+            Assert(gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddSeconds(2)),
+                start.AddSeconds(2),out effective).IsEmpty,"drag displayed an unconfirmed anchor");
+            gate.SetMoving(false,start.AddSeconds(2));
+            Assert(gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(2001)),
+                start.AddMilliseconds(2001),out effective).IsEmpty,"drag carried pre-move confirmation into recovery");
+            Assert(!gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(2401)),
+                start.AddMilliseconds(2401),out effective).IsEmpty,"two post-drag captures did not confirm");
+            for(int change=0;change<4;change++)
+            {
+                gate=new ComposerVisibilityGate();
+                gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start),start,out effective);
+                gate.Resolve(Handle,Window,Window,Size,1f,Snapshot(ComposerProbeState.Composer,start.AddMilliseconds(400)),
+                    start.AddMilliseconds(400),out effective);
+                gate.SetMoving(true,start.AddMilliseconds(500));
+                Rectangle target=Window; if(change==0)target.Width++;
+                Assert(gate.Resolve(change==1?new IntPtr(43):Handle,target,Window,
+                    change==3?new Size(Size.Width,Size.Height+1):Size,change==2?1.25f:1f,null,
+                    start.AddMilliseconds(600),out effective).IsEmpty,"drag retained an anchor across size/target/DPI/height change");
+            }
+        }
+
+        internal static void ProbeDragPausesAndDiscardsInFlightResults()
+        {
+            int calls=0;
+            using(var secondEntered=new ManualResetEvent(false))
+            using(var releaseSecond=new ManualResetEvent(false))
+            using(var thirdEntered=new ManualResetEvent(false))
+            using(var releaseThird=new ManualResetEvent(false))
+            using(var probe=new ComposerWindowProbe(delegate(IntPtr handle,Rectangle window,float scale) {
+                int call=Interlocked.Increment(ref calls);
+                if(call==2) { secondEntered.Set(); releaseSecond.WaitOne(3000); }
+                if(call==3) { thirdEntered.Set(); releaseThird.WaitOne(3000); }
+                var snapshot=Snapshot(call==2?ComposerProbeState.NoComposer:ComposerProbeState.Composer,DateTime.UtcNow);
+                return snapshot.InWindow(window);
+            }))
+            {
+                try
+                {
+                    probe.Read(Handle,Window,1f);
+                    Assert(secondEntered.WaitOne(2000),"probe did not enter its second capture");
+                    probe.SetMoving(true);
+                    Rectangle moved=Window; moved.Offset(-19,23);
+                    var cached=probe.Read(Handle,moved,1f);
+                    Assert(cached!=null && cached.State==ComposerProbeState.Composer && cached.ToolbarHost.Left==521,
+                        "pausing lost the last verified translated cache");
+                    releaseSecond.Set(); Thread.Sleep(280);
+                    Assert(Interlocked.CompareExchange(ref calls,0,0)==2 &&
+                        probe.Read(Handle,moved,1f).State==ComposerProbeState.Composer,
+                        "paused worker continued capturing or published its old in-flight absence");
+                    moved.Offset(3,4); probe.Read(Handle,moved,1f);
+                    probe.SetMoving(false);
+                    Assert(thirdEntered.WaitOne(2000),"release failed to wake capture");
+                    Assert(probe.Read(Handle,moved,1f)==null,"release reused a pre-move cache as fresh validation");
+                    releaseThird.Set(); ComposerProbeSnapshot fresh=null;
+                    for(int i=0;i<100&&fresh==null;i++) { Thread.Sleep(10); fresh=probe.Read(Handle,moved,1f); }
+                    Assert(fresh!=null && fresh.State==ComposerProbeState.Composer && fresh.Window==moved && fresh.ToolbarHost.Left==524,
+                        "resumed capture did not use the final requested window");
+                    probe.SetMoving(true); moved.Width++;
+                    Assert(probe.Read(Handle,moved,1f)==null,"resize retained paused geometry");
+                    probe.Invalidate();
+                    probe.Read(Handle,Window,1f); fresh=null;
+                    for(int i=0;i<100&&fresh==null;i++) { Thread.Sleep(10); fresh=probe.Read(Handle,Window,1f); }
+                    Assert(fresh!=null,"invalidation left the worker paused");
+                }
+                finally { releaseSecond.Set(); releaseThird.Set(); }
+            }
         }
 
         private static void Assert(bool condition, string message)

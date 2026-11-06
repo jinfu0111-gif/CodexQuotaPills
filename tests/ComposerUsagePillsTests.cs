@@ -5,6 +5,33 @@ namespace CodexUsageOverlay
 {
     internal static class ComposerUsagePillsTests
     {
+        public static void ProUnlimitedIsConsistentAcrossLayouts()
+        {
+            UsageData usage = new UsageData { Plan = "prolite", HasPlan = true,
+                ShortUnlimited = true, HasShortLimitState = true,
+                WeeklyRemaining = 73, HasWeeklyRemaining = true };
+            Assert(String.Join("|", ComposerUsagePillLayout.BuildTexts(usage)) == "PRO|5h ∞|周 73%",
+                "Pro internal plan or obsolete 5h quota leaked into capsule");
+            QuotaHoverCardContent card = ComposerUsagePillTooltips.BuildSidebarCard(usage, null, DateTimeOffset.Now);
+            Assert(card.Title == "PRO · 额度与用量" && card.ShortLine.Contains("无 5 小时限额") &&
+                !card.ShortLine.Contains("重置"), "unlimited hover still waits for a reset");
+            using (Bitmap canvas = new Bitmap(450, 120))
+            using (Graphics graphics = Graphics.FromImage(canvas))
+            using (Font font = new Font("Microsoft Sans Serif", 8f))
+            {
+                ComposerUsagePillLayout sidebar = ComposerUsagePillLayout.CreateSidebar(usage, graphics, font, 40);
+                Assert(sidebar.Pills[0].Unlimited && !sidebar.Pills[0].Remaining.HasValue,
+                    "sidebar turned unlimited into a fake percentage");
+                ComposerUsagePillLayout.Draw(graphics, sidebar, font, false, false);
+                OverlaySettings minimal = new OverlaySettings { ShowPlanPill = false };
+                Assert(ComposerUsagePillLayout.BuildTexts(usage, minimal)[0] == "5h ∞",
+                    "hiding plan removed the unlimited menu entry");
+            }
+            usage.HasShortLimitState = false;
+            Assert(String.Join("|", ComposerUsagePillLayout.BuildTexts(usage)) == "PRO|5h —|周 73%",
+                "unconfirmed short limit state was displayed as unlimited");
+        }
+
         public static void OptionalPillsToggleIndependentlyWithoutDataLoss()
         {
             UsageData usage = new UsageData { Plan = "Plus", ShortRemaining = 79, WeeklyRemaining = 68,

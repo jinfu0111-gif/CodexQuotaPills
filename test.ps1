@@ -46,6 +46,12 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     (Join-Path $projectRoot 'CodexClientUpdateForm.cs') `
     (Join-Path $projectRoot 'tests\SidebarLayoutTests.cs') `
     (Join-Path $projectRoot 'UsageData.cs') `
+    (Join-Path $projectRoot 'ResetCreditData.cs') `
+    (Join-Path $projectRoot 'AutoResetCreditsService.cs') `
+    (Join-Path $projectRoot 'AutoResetCreditsForm.cs') `
+    (Join-Path $projectRoot 'tests\ResetCreditTransportTests.cs') `
+    (Join-Path $projectRoot 'tests\AutoResetCreditsTests.cs') `
+    (Join-Path $projectRoot 'tests\AutoResetCreditsFormTests.cs') `
     (Join-Path $projectRoot 'AccountTokenPolicy.cs') `
     (Join-Path $projectRoot 'SessionUsageReader.cs') `
     (Join-Path $projectRoot 'tests\SessionUsageTests.cs') `

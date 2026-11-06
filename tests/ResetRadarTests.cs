@@ -48,6 +48,21 @@ internal static class ResetRadarTests
         if (args.Length == 1 && args[0] == "--live-auto-resume-scan-readonly")
             return AutoResumeTests.LiveScanReadOnly();
         Run("auto-resume requires structured quota failure", AutoResumeTests.StructuredErrorsOnly);
+        Run("reset credit transport requires account-bound live details", ResetCreditTransportTests.InventoryRequiresAccountBoundRealDetails);
+        Run("reset credit consume rechecks exact card and account", ResetCreditTransportTests.ConsumeIsNarrowAndRechecksLiveOwnership);
+        Run("auto reset defaults off and offline configuration cannot consume", AutoResetCreditsTests.DefaultsPauseAndOfflineConfiguration);
+        Run("auto reset observes exact ten-minute and freshness boundaries", AutoResetCreditsTests.ExactExpiryBoundaryAndFreshness);
+        Run("auto reset skips unknown and manually used cards", AutoResetCreditsTests.MissingAndManuallyUsedCardsAreNeverRedeemed);
+        Run("auto reset preserves distinct cards sharing an expiry", AutoResetCreditsTests.DuplicateIdsAndEqualExpiryRemainDistinct);
+        Run("auto reset unknown result retains durable key across restart", AutoResetCreditsTests.UnknownOutcomeReusesDurableKeyAcrossRestart);
+        Run("auto reset retries definite nonconsumption as new logical attempt", AutoResetCreditsTests.NothingToResetUsesNewLogicalAttemptAndNoCreditStops);
+        Run("auto reset account changes and manual pause prevent dispatch", AutoResetCreditsTests.AccountSwitchPausesAndDisableDuringReadWins);
+        Run("auto reset corrupt unwritable or competing state stops dispatch", AutoResetCreditsTests.CorruptUnwritableAndCompetingStateStopWrites);
+        Run("auto reset never retries after a pending card expires", AutoResetCreditsTests.ExpiredPendingAttemptIsNeverSentAgain);
+        Run("auto reset network does not block pause status or shutdown", AutoResetCreditsTests.SlowNetworkDoesNotBlockPauseSnapshotOrDispose);
+        Run("reset card UI never fabricates an expiry", AutoResetCreditsFormTests.UnknownCreditDetailsNeverInventAnExpiry);
+        Run("reset card UI schedules and pauses individual cards", AutoResetCreditsFormTests.AutoUseTimeAndPauseStayScopedToEachCard);
+        Run("reset card UI preview cannot show or consume", AutoResetCreditsFormTests.PreviewDoesNotStartAServiceOrShowAWindow);
         Run("auto-resume respects attention and settings", AutoResumeTests.AttentionAndSettingsGuard);
         Run("auto-resume requires complete canonical history", AutoResumeTests.CanonicalHistoryMustBeComplete);
         Run("auto-resume rechecks real quota and weekly limit", AutoResumeTests.QuotaRecheckedAndWeeklyHonored);
@@ -109,6 +124,7 @@ internal static class ResetRadarTests
         Run("lifecycle start failures are throttled", CodexLifecycleTests.FailedStartsAreThrottled);
         Run("missing Codex uses a shutdown grace period", CodexLifecycleTests.MissingCodexUsesGracePeriod);
         Run("composer pills expose native quota fields", ComposerUsagePillsTests.NativeQuotaFieldsAreExposed);
+        Run("Pro unlimited quota is consistent across layouts", ComposerUsagePillsTests.ProUnlimitedIsConsistentAcrossLayouts);
         Run("composer pills omit unavailable quota fields", ComposerUsagePillsTests.UnavailableQuotaFieldsAreOmitted);
         Run("composer pills clamp invalid percentages", ComposerUsagePillsTests.PercentagesAreClamped);
         Run("quota hover shows reset times", ComposerUsagePillsTests.QuotaHoverShowsResetTimes);
@@ -131,6 +147,11 @@ internal static class ResetRadarTests
         Run("invalid window plan does not leak", UsageTrustPolicyTests.InvalidWindowPlanDoesNotLeakIntoSnapshot);
         Run("quota window requires duration", UsageTrustPolicyTests.WindowWithoutDurationIsRejected);
         Run("weekly partial response preserves cached fields", UsageTrustPolicyTests.PartialWeeklyWindowPreservesCachedFields);
+        Run("complete Pro weekly snapshot removes obsolete short quota", UsageTrustPolicyTests.CompleteProWeeklySnapshotClearsObsoleteShortQuota);
+        Run("returned short quota exits unlimited state", UsageTrustPolicyTests.ShortLimitReturnsAfterUnlimitedSnapshot);
+        Run("unlimited requires a complete verified Pro weekly window", UsageTrustPolicyTests.UnlimitedRequiresCompleteVerifiedProWindow);
+        Run("Codex map and reached status follow actual window duration", UsageTrustPolicyTests.CodexMapWinsAndWeeklyPrimaryStatusFollowsDuration);
+        Run("Pro display aliases preserve raw subscription data", UsageTrustPolicyTests.ProDisplayAliasesDoNotChangeRawPlan);
         Run("explicit zero reset credits override cache", UsageTrustPolicyTests.ExplicitZeroCreditsOverridesCachedCount);
         Run("reset credit expiry is parsed", UsageTrustPolicyTests.ResetCreditExpiryIsParsed);
         Run("available credit inventory preserves status and duplicate dates", UsageTrustPolicyTests.AvailableCreditInventoryIsPreserved);
@@ -178,6 +199,11 @@ internal static class ResetRadarTests
         Run("permission anchor never selects a later arbitrary gap", ComposerPlacementTests.PermissionAnchorNeverJumpsToAnotherGap);
         Run("scrolling pane preserves toolbar and permission moves realign", ComposerPlacementTests.ScrollingPaneDoesNotResetAnUnchangedToolbar);
         Run("overflowing composer ancestor clips to visible safe toolbar", ComposerPlacementTests.OverflowingComposerContainerUsesVisibleIntersection);
+        Run("captured drag mismatch preserves the bounded validated anchor", ComposerPlacementTests.CapturedDragMismatchKeepsTheValidatedAnchor);
+        Run("moving capture cannot publish absence or mixed geometry", ComposerPlacementTests.MovingCaptureCannotPublishAbsenceOrMixedGeometry);
+        Run("native drag freezes until a post-release validation", ComposerPlacementTests.NativeDragFreezesUntilPostReleaseValidation);
+        Run("drag cannot confirm or carry an invalid anchor", ComposerPlacementTests.DragCannotConfirmOrCarryAnInvalidAnchor);
+        Run("probe drag pauses work and discards in-flight results", ComposerPlacementTests.ProbeDragPausesAndDiscardsInFlightResults);
         Run("missing and ambiguous Codex anchors are rejected", ComposerPlacementTests.MissingOrAmbiguousCodexAnchorsAreRejected);
         Run("sidebar boundary detection fails closed", SidebarLayoutTests.BoundaryDetectionDoesNotGuessCollapsedSidebar);
         Run("dark palette contrast and light restoration", SidebarLayoutTests.DarkPaletteIsReadableAndRestoresLight);

@@ -19,7 +19,7 @@ internal static class ValidateOffscreenPreviews
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         int shown = 0;
-        foreach (string name in new[] { "FirstRunGuideForm", "CodexClientUpdateForm", "AutoResumeForm", "SessionUsageForm" })
+        foreach (string name in new[] { "FirstRunGuideForm", "CodexClientUpdateForm", "AutoResumeForm", "AutoResetCreditsForm", "SessionUsageForm" })
         {
             Type type = assembly.GetType("CodexUsageOverlay." + name, true);
             object[] parameters = name == "FirstRunGuideForm" ? new object[0] :

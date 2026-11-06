@@ -130,6 +130,126 @@ namespace CodexUsageOverlay
             Assert(cached.AvailableResetCredits == 2, "missing reset credits cleared cache");
         }
 
+        public static void CompleteProWeeklySnapshotClearsObsoleteShortQuota()
+        {
+            UsageData cached = CachedProUsage();
+            cached.HasShortRemaining = true;
+            cached.HasShortResetText = true;
+            IDictionary<string, object> response = RateLimits("prolite",
+                Window(10080, 0d, 1793860572L), null, true, null, false, 0);
+            ((IDictionary<string, object>)response["rateLimits"])["secondary"] = null;
+            UsageData incoming = new UsageData();
+            Assert(CodexAppServerClient.TryParseTrustedSnapshot(
+                Account("chatgpt", "prolite", null), response, incoming), "Pro weekly snapshot rejected");
+            Assert(incoming.Plan == "prolite" && incoming.HasShortLimitState && incoming.ShortUnlimited,
+                "complete Pro snapshot lost raw plan or absent short limit evidence");
+            Assert(UsageDataMerger.MergeInto(cached, incoming), "upgrade did not invalidate cached short limit");
+            Assert(cached.ShortUnlimited && cached.HasShortLimitState &&
+                !cached.ShortRemaining.HasValue && !cached.HasShortRemaining &&
+                cached.ShortResetText == "—" && !cached.HasShortResetText && cached.WeeklyRemaining == 100,
+                "upgraded Pro retained obsolete five-hour percentage or reset");
+            Assert(cached.Clone().ShortUnlimited && cached.Clone().HasShortLimitState,
+                "snapshot clone lost short limit state");
+        }
+
+        public static void ShortLimitReturnsAfterUnlimitedSnapshot()
+        {
+            UsageData cached = new UsageData { Plan = "prolite", ShortUnlimited = true,
+                HasShortLimitState = true, ShortResetText = "—" };
+            UsageData incoming = new UsageData();
+            Assert(CodexAppServerClient.TryParseTrustedSnapshot(Account("chatgpt", "plus", null),
+                RateLimits("plus", Window(300, 12d, 1793860572L),
+                    Window(10080, 35d, 1793860572L), true, null, false, 0), incoming),
+                "restored short limit snapshot rejected");
+            UsageDataMerger.MergeInto(cached, incoming);
+            Assert(!cached.ShortUnlimited && cached.HasShortLimitState &&
+                cached.ShortRemaining == 88 && cached.HasShortRemaining && cached.HasShortResetText,
+                "a returned short quota remained unlimited");
+
+            cached.ShortUnlimited = true;
+            incoming = new UsageData();
+            Assert(CodexAppServerClient.TryParseTrustedSnapshot(Account("chatgpt", "plus", null),
+                RateLimits("plus", Window(10080, 35d, null), null, false, null, false, 0), incoming),
+                "changed subscription partial snapshot rejected");
+            UsageDataMerger.MergeInto(cached, incoming);
+            Assert(!cached.ShortUnlimited, "known non-Pro plan retained a previous Pro unlimited label");
+        }
+
+        public static void UnlimitedRequiresCompleteVerifiedProWindow()
+        {
+            foreach (string plan in new[] { "pro", "prolite", "plus", "unknown", "pro_future" })
+            {
+                foreach (long duration in new long[] { 300, 1440, 10080, 43200 })
+                {
+                    IDictionary<string, object> response = RateLimits(plan,
+                        Window(duration, 10d, null), null, false, null, false, 0);
+                    UsageData partial = new UsageData();
+                    CodexAppServerClient.TryParseTrustedSnapshot(Account("chatgpt", plan, null), response, partial);
+                    Assert(!partial.ShortUnlimited, "missing window key was interpreted as unlimited");
+                    ((IDictionary<string, object>)response["rateLimits"])["secondary"] = null;
+                    UsageData complete = new UsageData();
+                    CodexAppServerClient.TryParseTrustedSnapshot(Account("chatgpt", plan, null), response, complete);
+                    Assert(complete.ShortUnlimited == ((plan == "pro" || plan == "prolite") && duration == 10080),
+                        "unlimited inferred from an unsupported plan or nonweekly duration");
+                }
+            }
+            foreach (object broken in new object[] { ObjectOf("usedPercent", 0),
+                ObjectOf("windowDurationMins", 300), "unreadable" })
+            {
+                IDictionary<string, object> response = RateLimits("prolite",
+                    Window(10080, 10d, null), null, false, null, false, 0);
+                ((IDictionary<string, object>)response["rateLimits"])["secondary"] = broken;
+                UsageData usage = new UsageData();
+                CodexAppServerClient.TryParseTrustedSnapshot(Account("chatgpt", "prolite", null), response, usage);
+                Assert(!usage.ShortUnlimited, "malformed non-null short window was interpreted as absent");
+            }
+            foreach (IDictionary<string, object> broken in new[] {
+                ObjectOf("windowDurationMins", 10080),
+                ObjectOf("windowDurationMins", 10080, "usedPercent", Double.NaN),
+                ObjectOf("windowDurationMins", 10080, "resetsAt", Int64.MaxValue) })
+            {
+                IDictionary<string, object> response = ObjectOf("rateLimits", ObjectOf(
+                    "planType", "prolite", "primary", broken, "secondary", null));
+                UsageData usage = new UsageData();
+                Assert(!CodexAppServerClient.TryParseTrustedSnapshot(
+                    Account("chatgpt", "prolite", null), response, usage) && !usage.ShortUnlimited,
+                    "invalid weekly window established unlimited");
+            }
+        }
+
+        public static void CodexMapWinsAndWeeklyPrimaryStatusFollowsDuration()
+        {
+            IDictionary<string, object> response = RateLimits("plus", Window(300, 12d, null),
+                Window(10080, 25d, null), true, null, false, 0);
+            response["rateLimitsByLimitId"] = ObjectOf("codex", ObjectOf(
+                "planType", "prolite", "primary", Window(10080, 100d, 1793860572L),
+                "secondary", null, "rateLimitReachedType", "primary"));
+            UsageData usage = new UsageData();
+            Assert(CodexAppServerClient.TryParseTrustedSnapshot(Account("chatgpt", "plus", null), response, usage),
+                "mapped Codex limits rejected");
+            Assert(usage.Plan == "prolite" && usage.WeeklyRemaining == 0 && usage.ShortUnlimited &&
+                usage.RateLimitStatus == "周额度受限", "legacy values or positional short-window assumption leaked");
+            response = ObjectOf("rateLimits", ObjectOf("planType", "plus",
+                "primary", Window(10080, 30d, null), "secondary", Window(300, 40d, null),
+                "rateLimitReachedType", "secondary"));
+            usage = new UsageData();
+            Assert(CodexAppServerClient.TryParseTrustedSnapshot(Account("chatgpt", "plus", null), response, usage) &&
+                usage.WeeklyRemaining == 70 && usage.ShortRemaining == 60 &&
+                usage.RateLimitStatus == "短期受限", "swapped quota slots were classified by position");
+        }
+
+        public static void ProDisplayAliasesDoNotChangeRawPlan()
+        {
+            foreach (string raw in new[] { "pro", "prolite", "PROLITE", " Pro " })
+                Assert(UsageDisplayText.FormatPlan(raw) == "PRO", "known Pro display alias was not normalized");
+            Assert(UsageDisplayText.FormatPlan("pro_future") == "PRO_FUTURE" &&
+                UsageDisplayText.FormatPlan(null) == "CHATGPT" && UsageDisplayText.FormatPlan("plus") == "PLUS",
+                "display mapping guessed an unsupported Pro alias or changed a non-Pro label");
+            UsageData usage = new UsageData { Plan = "prolite" };
+            Assert(UsageDisplayText.Build(usage, 500).StartsWith("PRO |", StringComparison.Ordinal) &&
+                usage.Plan == "prolite", "display label changed the raw service plan");
+        }
+
         public static void ExplicitZeroCreditsOverridesCachedCount()
         {
             UsageData cached = CachedProUsage();

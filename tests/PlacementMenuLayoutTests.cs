@@ -28,6 +28,15 @@ namespace CodexUsageOverlay
         }
         internal static void UnifiedMenuActionsUseSeparatePills()
         {
+            Assert((int)PlacementMenuAction.SessionUsage == 11 &&
+                (int)PlacementMenuAction.AutoResetCredits == 12,
+                "new reset-card action changed existing action IDs");
+            Assert(PlacementMenuLayout.LogicalHeight == 256,
+                "unified compact menu height did not shrink to five rows");
+            Assert(PlacementMenuLayout.ActionBounds(PlacementMenuAction.SessionUsage) == new Rectangle(72, 212, 81, 30) &&
+                PlacementMenuLayout.ActionBounds(PlacementMenuAction.AutoResume) == new Rectangle(159, 212, 81, 30) &&
+                PlacementMenuLayout.ActionBounds(PlacementMenuAction.AutoResetCredits) == new Rectangle(246, 212, 82, 30),
+                "advanced tool actions are not aligned as three compact pills on row five");
             foreach (PlacementMenuAction action in Enum.GetValues(typeof(PlacementMenuAction)))
             {
                 Rectangle bounds = PlacementMenuLayout.ActionBounds(action);
@@ -41,7 +50,8 @@ namespace CodexUsageOverlay
                     bounds.Bottom < PlacementMenuLayout.LogicalHeight,
                     "action pill falls outside the menu");
                 if (PlacementMenuLayout.IsDisplayToggle(action))
-                    Assert(!PlacementMenuLayout.IsThemeAction(action), "display toggle is mistaken for a theme change");
+                    Assert(!PlacementMenuLayout.IsThemeAction(action) && !PlacementMenuLayout.IsToolAction(action),
+                        "display toggle is mistaken for a theme or tool action");
                 foreach (PlacementMenuAction other in Enum.GetValues(typeof(PlacementMenuAction)))
                     if (other != action) Assert(!bounds.IntersectsWith(PlacementMenuLayout.ActionBounds(other)), "action pills overlap");
             }

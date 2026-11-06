@@ -1,6 +1,8 @@
 # 从链接安装 Codex Quota Pills
 
-当前正式版为 **0.2.36**。普通用户使用安装脚本或正式便携 ZIP；升级前保留旧目录、显示设置及共享续跑记录。菜单入口统一为 **5h**，0.2.24 等旧版仍点击 PLUS。
+当前正式版为 **0.2.38**。普通用户使用安装脚本或正式便携 ZIP；升级前保留旧目录、显示设置及共享续跑记录。菜单入口统一为 **5h**，0.2.24 等旧版仍点击 PLUS。
+
+0.2.38 提供 Pro `PRO / 5h ∞` 适配、输入框拖动稳定性修复和独立的重置卡临期自动使用。自动用卡默认关闭，需用户主动启用。升级保留显示设置、共享续跑账本和自动用卡的独立开关/幂等记录。
 
 给 Windows 本机 Codex 发这一句话即可表达完整意图：
 
@@ -34,7 +36,7 @@
 # 指定已记录 SHA-256 的正式版本，适合 API 暂时限流
 .\install.ps1 -PinnedRelease
 # 已下载便携包：仍按固定 manifest 核对大小和摘要
-.\install.ps1 -PackagePath 'C:\Downloads\CodexQuotaPills-0.2.36-portable.zip' -NoLaunch
+.\install.ps1 -PackagePath 'C:\Downloads\CodexQuotaPills-0.2.38-portable.zip' -NoLaunch
 # 用户明确要求登录 Windows 后自动跟随 Codex
 .\install.ps1 -Startup
 # 隔离验证，不启动程序、不创建入口、不修改续跑设置
@@ -50,3 +52,4 @@
 发布前运行 `tests\InstallTests.ps1`。正式包打包时包含本文；源码包同时包含安装脚本、固定 manifest 与公开 Agent 安装指引。发布者在新 Release 资产摘要确认后更新 `install-release.json`，不能填写未验证的摘要。默认仍使用在线 latest，manifest 仅是明确标记的固定版本选择或网络回退。
 
 公开仓库根目录 `AGENTS.md` 使用 `installer-assets/AGENTS.public.md` 的内容；本机维护 AGENTS.md 包含工作区约定，应保留，不整份覆盖或直接公开。本机完成和 GitHub 已发布是两个状态，只有用户明确要求发布时才同步。
+

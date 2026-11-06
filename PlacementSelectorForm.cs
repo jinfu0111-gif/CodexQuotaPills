@@ -17,6 +17,8 @@ namespace CodexUsageOverlay
         private readonly Action<PlacementMenuAction> actionSelected;
         private readonly Timer dismissTimer;
         private OverlayPlacement selectedPlacement;
+        private OverlayPlacement? hoveredPlacement;
+        private PlacementMenuAction? hoveredAction;
         private Rectangle anchorScreenBounds = Rectangle.Empty;
         private DateTime? pointerOutsideSince;
         private float dpiScale = 1f;
@@ -25,6 +27,7 @@ namespace CodexUsageOverlay
         private bool showResetCreditsPill = true;
         private bool holdAnchorForDisplayToggle;
         private Rectangle anchorWindowBounds;
+        private IntPtr ownerHandle = IntPtr.Zero;
 
         internal void SetPillVisibility(OverlaySettings settings)
         {
@@ -78,9 +81,12 @@ namespace CodexUsageOverlay
             IntPtr owner, OverlaySettings displaySettings = null)
         {
             selectedPlacement = placement;
+            hoveredPlacement = null;
+            hoveredAction = null;
             anchorScreenBounds = anchorBounds;
             holdAnchorForDisplayToggle = false;
             anchorWindowBounds = PopupUiContext.WindowBounds;
+            ownerHandle = owner;
             SetPillVisibility(displaySettings);
             pointerOutsideSince = null;
             dpiScale = Math.Max(0.5f, scale);
@@ -97,6 +103,8 @@ namespace CodexUsageOverlay
                     NativeMethods.SetOwner(Handle, owner);
                 NativeMethods.ShowWindow(Handle, NativeMethods.SW_SHOWNOACTIVATE);
             }
+            if (owner != IntPtr.Zero)
+                OverlayWindowPresentation.Recover(this, owner);
             RenderLayered();
             dismissTimer.Start();
         }
@@ -105,6 +113,8 @@ namespace CodexUsageOverlay
         {
             dismissTimer.Stop();
             holdAnchorForDisplayToggle = false;
+            hoveredPlacement = null;
+            hoveredAction = null;
             pointerOutsideSince = null;
             if (Visible)
                 Hide();
@@ -113,6 +123,8 @@ namespace CodexUsageOverlay
         internal void ExportPreview(string path, OverlayPlacement placement, OverlaySettings displaySettings = null)
         {
             selectedPlacement = placement;
+            hoveredPlacement = null;
+            hoveredAction = null;
             SetPillVisibility(displaySettings);
             dpiScale = 1f;
             Size = new Size(LogicalWidth, LogicalHeight);
@@ -165,9 +177,33 @@ namespace CodexUsageOverlay
         {
             base.OnMouseMove(e);
             Point logical = ToLogical(e.Location);
+            UpdateHoverState(logical);
             Cursor = PlacementMenuLayout.IsClickable(logical)
                 ? Cursors.Hand
                 : Cursors.Default;
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (hoveredPlacement.HasValue || hoveredAction.HasValue)
+            {
+                hoveredPlacement = null;
+                hoveredAction = null;
+                RenderLayered();
+            }
+        }
+
+        private void UpdateHoverState(Point logical)
+        {
+            OverlayPlacement? nextPlacement = PlacementMenuLayout.HitTestPlacement(logical);
+            PlacementMenuAction? nextAction = nextPlacement.HasValue ? null : PlacementMenuLayout.HitTestAction(logical);
+            if (nextPlacement != hoveredPlacement || nextAction != hoveredAction)
+            {
+                hoveredPlacement = nextPlacement;
+                hoveredAction = nextAction;
+                RenderLayered();
+            }
         }
 
         protected override void WndProc(ref Message message)
@@ -192,6 +228,8 @@ namespace CodexUsageOverlay
 
         private void CheckPointerLocation(object sender, EventArgs e)
         {
+            if (ownerHandle != IntPtr.Zero && Visible)
+                OverlayWindowPresentation.Recover(this, ownerHandle);
             if (!PopupUiContext.Anchor.IsEmpty)
             {
                 if (holdAnchorForDisplayToggle && PopupUiContext.WindowBounds.Size == anchorWindowBounds.Size)
@@ -211,6 +249,14 @@ namespace CodexUsageOverlay
                 if (Location != position) { Location = position; RenderLayered(); }
             }
             Point pointer = Control.MousePosition;
+            if (Bounds.Contains(pointer))
+                UpdateHoverState(ToLogical(PointToClient(pointer)));
+            else if (hoveredPlacement.HasValue || hoveredAction.HasValue)
+            {
+                hoveredPlacement = null;
+                hoveredAction = null;
+                RenderLayered();
+            }
             Rectangle anchor = anchorScreenBounds;
             anchor.Inflate(Scale(5), Scale(5));
             Rectangle bridge = Rectangle.FromLTRB(Math.Min(anchor.Right, Left) - Scale(4),
@@ -282,9 +328,7 @@ namespace CodexUsageOverlay
                         new Rectangle(12, 132, 55, 30), labelFormat);
                     graphics.DrawString("胶囊显示", titleFont, titleBrush,
                         new Rectangle(12, 172, 55, 30), labelFormat);
-                    graphics.DrawString("任务续跑", titleFont, titleBrush,
-                        new Rectangle(12, 252, 55, 30), labelFormat);
-                    graphics.DrawString("会话数据", titleFont, titleBrush,
+                    graphics.DrawString("进阶功能", titleFont, titleBrush,
                         new Rectangle(12, 212, 55, 30), labelFormat);
                 }
                 using (Pen divider = new Pen(Color.FromArgb(42, 148, 163, 184), 1f))
@@ -310,10 +354,12 @@ namespace CodexUsageOverlay
                     Color.FromArgb(59, 130, 246), false);
                 DrawAction(graphics, PlacementMenuAction.ExitApplication, "退出程序",
                     Color.FromArgb(219, 61, 94), true);
-                DrawAction(graphics, PlacementMenuAction.AutoResume, "额度恢复后自动续跑",
-                    Color.FromArgb(16, 185, 129), false);
-                DrawAction(graphics, PlacementMenuAction.SessionUsage, "会话用量 · 缓存与上下文",
+                DrawAction(graphics, PlacementMenuAction.SessionUsage, "会话数据",
                     Color.FromArgb(245, 158, 11), false);
+                DrawAction(graphics, PlacementMenuAction.AutoResume, "任务续跑",
+                    Color.FromArgb(16, 185, 129), false);
+                DrawAction(graphics, PlacementMenuAction.AutoResetCredits, "重置卡",
+                    Color.FromArgb(236, 72, 153), false);
                 DrawAction(graphics, PlacementMenuAction.TogglePlan, "套餐 " + (showPlanPill ? "显示" : "隐藏"),
                     showPlanPill ? Color.FromArgb(139, 92, 246) : QuotaPillVisuals.MutedText, false);
                 DrawAction(graphics, PlacementMenuAction.ToggleTokens, "Token " + (showTokenPill ? "显示" : "隐藏"),
@@ -332,7 +378,8 @@ namespace CodexUsageOverlay
         {
             Rectangle bounds = PlacementMenuLayout.ChoiceBounds(placement);
             bool selected = placement == selectedPlacement;
-            DrawPill(graphics, bounds, text, accent, selected, false);
+            bool hovered = hoveredPlacement.HasValue && hoveredPlacement.Value == placement;
+            DrawPill(graphics, bounds, text, accent, selected, hovered, false);
         }
 
         private void DrawAction(
@@ -348,7 +395,8 @@ namespace CodexUsageOverlay
                 action == PlacementMenuAction.TogglePlan && showPlanPill ||
                 action == PlacementMenuAction.ToggleTokens && showTokenPill ||
                 action == PlacementMenuAction.ToggleResetCredits && showResetCreditsPill;
-            DrawPill(graphics, PlacementMenuLayout.ActionBounds(action), text, accent, selected, danger);
+            bool hovered = hoveredAction.HasValue && hoveredAction.Value == action;
+            DrawPill(graphics, PlacementMenuLayout.ActionBounds(action), text, accent, selected, hovered, danger);
         }
 
         private static void DrawPill(
@@ -357,23 +405,33 @@ namespace CodexUsageOverlay
             string text,
             Color accent,
             bool selected,
+            bool hovered,
             bool danger)
         {
             Color fillColor = selected
                 ? (PopupUiContext.Dark ? Color.FromArgb(55, 44, 78) : Color.FromArgb(255, 242, 238, 255))
-                : QuotaPillVisuals.Surface;
+                : hovered
+                    ? (PopupUiContext.Dark ? Color.FromArgb(46, 53, 68) : Color.FromArgb(252, 244, 247, 254))
+                    : QuotaPillVisuals.Surface;
             Color borderColor = selected
                 ? Color.FromArgb(165, accent)
-                : QuotaPillVisuals.Border;
+                : hovered
+                    ? Color.FromArgb(135, accent)
+                    : QuotaPillVisuals.Border;
             using (GraphicsPath path = RoundedRectangle(bounds, 15))
             using (Brush fill = new SolidBrush(fillColor))
-            using (Pen border = new Pen(borderColor, selected ? 1.25f : 1f))
+            using (Pen border = new Pen(borderColor, selected || hovered ? 1.25f : 1f))
             {
                 graphics.FillPath(fill, path);
                 graphics.DrawPath(border, path);
             }
 
             int dotY = bounds.Top + bounds.Height / 2 - 3;
+            if (hovered)
+            {
+                using (Brush halo = new SolidBrush(Color.FromArgb(36, accent.R, accent.G, accent.B)))
+                    graphics.FillEllipse(halo, bounds.Left + 5, dotY - 2, 10, 10);
+            }
             using (Brush dot = new SolidBrush(accent))
                 graphics.FillEllipse(dot, bounds.Left + 7, dotY, 6, 6);
             using (Font font = UiRendering.CreateTextFont(

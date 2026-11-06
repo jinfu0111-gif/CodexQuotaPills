@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Automation;
 
@@ -60,7 +61,7 @@ namespace CodexUsageOverlay
                     window.Contains(snapshot.Pane) && snapshot.Pane.Contains(snapshot.ToolbarHost) &&
                     (snapshot.LeftAnchor.IsEmpty || (snapshot.Pane.Contains(snapshot.LeftAnchor) &&
                         snapshot.ToolbarHost.Left == snapshot.LeftAnchor.Right + Math.Max(1, (int)Math.Round(4 * scale)))) &&
-                    preferred.Width <= snapshot.ToolbarHost.Width && preferred.Height <= snapshot.ToolbarHost.Height)
+                    snapshot.ToolbarHost.Width >= Math.Min(preferred.Width, (int)Math.Round(140 * scale)) && preferred.Height <= snapshot.ToolbarHost.Height)
                 {
                     Rectangle bottom = OverlayPlacementLayout.InHost(OverlayPlacement.ComposerBottom,
                         snapshot.ToolbarHost, area, preferred, scale);
@@ -171,18 +172,27 @@ namespace CodexUsageOverlay
         private int observations;
         private bool shown;
         private bool moving;
-        private DateTime motionGraceUntil;
+        private bool postMovePending;
+        private DateTime motionGraceUntil, motionReleasedUtc;
 
         internal void SetMoving(bool value, DateTime now)
         {
-            if (moving && !value && shown) motionGraceUntil = now.AddMilliseconds(750);
+            if (value && !shown) Reset();
+            if (moving && !value)
+            {
+                postMovePending = shown;
+                motionReleasedUtc = now;
+                motionGraceUntil = shown ? now.AddMilliseconds(750) : DateTime.MinValue;
+            }
+            if (value) postMovePending = false;
             moving = value;
         }
 
         internal void Reset()
         {
             candidate = Rectangle.Empty; observations = 0;
-            since = lastCapture = lastGood = motionGraceUntil = DateTime.MinValue; shown = moving = false;
+            since = lastCapture = lastGood = motionGraceUntil = motionReleasedUtc = DateTime.MinValue;
+            shown = moving = postMovePending = false;
         }
 
         internal Rectangle Resolve(IntPtr nextHandle, Rectangle nextWindow, Rectangle area, Size preferred,
@@ -190,25 +200,46 @@ namespace CodexUsageOverlay
         {
             effective = OverlayPlacement.ComposerBottom;
             bool sameTarget = handle == nextHandle && window.Size == nextWindow.Size &&
-                Math.Abs(scale - nextScale) < 0.01f && candidate.Size == preferred;
+                Math.Abs(scale - nextScale) < 0.01f && candidate.Height == preferred.Height;
             if (!candidate.IsEmpty && !sameTarget) Reset();
             if (!candidate.IsEmpty && window != nextWindow)
             {
                 int dx = nextWindow.Left - window.Left, dy = nextWindow.Top - window.Top;
                 candidate.Offset(dx, dy); pane.Offset(dx, dy); window = nextWindow;
             }
+            // A native drag moves the already verified anchor with its window.
+            // UIA can expose different moments of that drag in one tree read.
+            if (moving)
+            {
+                if (shown && nextWindow.Contains(candidate) && area.Contains(candidate)) return candidate;
+                return Rectangle.Empty;
+            }
             bool compatible = snapshot == null || (snapshot.Handle == nextHandle &&
                 snapshot.Window.Size == nextWindow.Size && Math.Abs(snapshot.Scale - nextScale) < 0.01f &&
                 snapshot.CapturedUtc <= now);
-            if (!compatible) { Reset(); return Rectangle.Empty; }
             snapshot = snapshot == null ? null : snapshot.InWindow(nextWindow);
+            if (postMovePending)
+            {
+                bool verifiedAfterRelease = compatible && ComposerPlacementPolicy.IsFresh(snapshot,
+                    nextHandle, nextWindow, nextScale, now) && snapshot.CapturedUtc > motionReleasedUtc &&
+                    snapshot.State != ComposerProbeState.Unavailable;
+                if (!verifiedAfterRelease)
+                {
+                    if (shown && now <= motionGraceUntil && nextWindow.Contains(candidate) && area.Contains(candidate))
+                        return candidate;
+                    Reset(); return Rectangle.Empty;
+                }
+                postMovePending = false;
+            }
+            if (!compatible) { Reset(); return Rectangle.Empty; }
             if (shown && ComposerPlacementPolicy.IsFresh(snapshot, nextHandle, nextWindow, nextScale, now) &&
                 snapshot.State == ComposerProbeState.Composer && snapshot.HostKind == "Toolbar" &&
                 nextWindow.Contains(snapshot.Pane) && snapshot.Pane.Contains(snapshot.ToolbarHost) &&
                 (snapshot.LeftAnchor.IsEmpty || (snapshot.Pane.Contains(snapshot.LeftAnchor) &&
                     snapshot.ToolbarHost.Left == snapshot.LeftAnchor.Right + Math.Max(1, (int)Math.Round(4 * nextScale)) &&
                     candidate.Left == snapshot.ToolbarHost.Left)) &&
-                snapshot.ToolbarHost.Contains(candidate) && area.Contains(candidate))
+                snapshot.ToolbarHost.Contains(candidate) && area.Contains(candidate) &&
+                candidate.Width == Math.Min(preferred.Width, snapshot.ToolbarHost.Width))
             {
                 foreach (Rectangle popup in snapshot.FloatingBounds ?? new Rectangle[0])
                     if (popup.IntersectsWith(candidate)) { Reset(); return Rectangle.Empty; }
@@ -222,10 +253,18 @@ namespace CodexUsageOverlay
             {
                 bool confirmed = ComposerPlacementPolicy.IsFresh(snapshot, nextHandle, nextWindow, nextScale, now) &&
                     snapshot.State != ComposerProbeState.Unavailable;
-                if (!confirmed && shown && now >= lastGood &&
+                if (!confirmed && !candidate.IsEmpty && now >= lastGood &&
                     (moving || now <= motionGraceUntil || now - lastGood <= TimeSpan.FromMilliseconds(1500)) &&
-                    nextWindow.Contains(candidate) && area.Contains(candidate)) return candidate;
+                    nextWindow.Contains(candidate) && area.Contains(candidate))
+                    return shown ? candidate : Rectangle.Empty;
                 Reset(); return Rectangle.Empty;
+            }
+            if (shown && handle == nextHandle && window == nextWindow &&
+                Math.Abs(scale - nextScale) < 0.01f && now >= since && snapshot.CapturedUtc >= lastCapture)
+            {
+                candidate = next; pane = snapshot.Pane;
+                lastCapture = snapshot.CapturedUtc; lastGood = snapshot.CapturedUtc;
+                return candidate;
             }
             if (candidate != next || handle != nextHandle || window != nextWindow || pane != snapshot.Pane ||
                 Math.Abs(scale - nextScale) >= 0.01f || now < since || snapshot.CapturedUtc < lastCapture)
@@ -314,7 +353,7 @@ namespace CodexUsageOverlay
         private readonly object gate = new object();
         private readonly AutoResetEvent wake = new AutoResetEvent(false);
         private Thread worker;
-        private bool disposed;
+        private bool disposed, moving;
         private IntPtr requestedHandle;
         private Rectangle requestedWindow;
         private float requestedScale;
@@ -354,7 +393,21 @@ namespace CodexUsageOverlay
             lock (gate)
             {
                 if (disposed) return;
-                generation++; latest = null; requestedHandle = IntPtr.Zero; wake.Set();
+                generation++; latest = null; moving = false; requestedHandle = IntPtr.Zero; wake.Set();
+            }
+        }
+
+        internal void SetMoving(bool value)
+        {
+            lock (gate)
+            {
+                if (disposed || moving == value) return;
+                moving = value;
+                // In-flight results from either side of a move boundary cannot
+                // replace the retained anchor or satisfy post-release validation.
+                generation++;
+                if (!moving) latest = null;
+                wake.Set();
             }
         }
 
@@ -371,7 +424,8 @@ namespace CodexUsageOverlay
                     lock (gate)
                     {
                         if (disposed) return;
-                        handle = requestedHandle; window = requestedWindow; scale = requestedScale; version = generation;
+                        handle = moving ? IntPtr.Zero : requestedHandle;
+                        window = requestedWindow; scale = requestedScale; version = generation;
                     }
                     if (handle != IntPtr.Zero)
                     {
@@ -380,10 +434,10 @@ namespace CodexUsageOverlay
                         catch { result = null; }
                         lock (gate)
                         {
-                            if (!disposed && version == generation) latest = result;
+                            if (!disposed && !moving && version == generation) latest = result;
                         }
                     }
-                    wake.WaitOne(200);
+                    wake.WaitOne(120);
                 }
             }
             finally
@@ -397,14 +451,17 @@ namespace CodexUsageOverlay
             ComposerProbeSnapshot result = new ComposerProbeSnapshot {
                 Handle = handle, Window = window, Scale = scale, State = ComposerProbeState.Unavailable
             };
-            // Timestamp at START: a provider that takes too long never publishes a fresh-looking result.
-            result.CapturedUtc = DateTime.UtcNow;
+            // Timestamp at START; refresh on completion if the scan finished within 1.5s.
+            DateTime captureStartedUtc = DateTime.UtcNow;
+            result.CapturedUtc = captureStartedUtc;
+            Rectangle nativeBefore = ReadNativeWindowBounds(handle);
             try
             {
+                if (nativeBefore.IsEmpty) return result;
                 AutomationElement root = AutomationElement.FromHandle(handle);
                 Rectangle actual = Bounds(root.Current.BoundingRectangle);
                 Rectangle tolerance = window; tolerance.Inflate((int)(16 * scale), (int)(16 * scale));
-                if (!tolerance.Contains(actual)) return result;
+                if (!actual.IsEmpty && !tolerance.Contains(actual)) return result;
                 CacheRequest cache = new CacheRequest();
                 cache.Add(AutomationElement.ControlTypeProperty);
                 cache.Add(AutomationElement.BoundingRectangleProperty);
@@ -413,18 +470,20 @@ namespace CodexUsageOverlay
                 cache.Add(AutomationElement.ClassNameProperty);
                 cache.Add(AutomationElement.AutomationIdProperty);
                 AutomationElementCollection nodes;
-                Condition leaves = new OrCondition(
+                Condition topCandidates = new OrCondition(
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ToolTip),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
+                Condition leaves = new OrCondition(
+                    topCandidates,
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text),
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox),
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.CheckBox),
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Hyperlink),
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem),
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu),
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ToolTip),
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
-                using (cache.Activate()) nodes = root.FindAll(TreeScope.Descendants, leaves);
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem));
+                using (cache.Activate()) nodes = root.FindAll(TreeScope.Descendants, topCandidates);
                 if (nodes.Count > 12000) return result;
                 List<Rectangle> floating = new List<Rectangle>();
                 foreach (AutomationElement node in nodes)
@@ -454,7 +513,8 @@ namespace CodexUsageOverlay
                     bool editor = IsEditorCandidate(data.AutomationId, data.ClassName, data.IsKeyboardFocusable, rect);
                     editorFound |= IsEditorIdentity(data.AutomationId, data.ClassName);
                     bool context = false, action = false, approval = false;
-                    if (data.ControlType == ControlType.Button && rect.Height <= (int)(64 * scale))
+                    if (data.ControlType == ControlType.Button && rect.Height <= (int)(64 * scale) &&
+                        (data.ClassName ?? "").IndexOf("sidebar-item", StringComparison.Ordinal) < 0)
                     {
                         // Only names of native-sized buttons are read; editor and Text names
                         // and patterns are never retrieved, including in the browser pane.
@@ -474,7 +534,7 @@ namespace CodexUsageOverlay
                 if (nodes.Count < 10) return result; // Title-bar-only UIA is not proof of Settings.
                 if (!editorFound && !contextFound)
                 {
-                    result.State = ComposerProbeState.NoComposer;
+                    result.State = MissingComposerState(editorFound, contextFound);
                     return result;
                 }
                 ComposerLayoutElement selected = ComposerLayoutRecognition.Select(elements, null, window, scale, result);
@@ -483,9 +543,11 @@ namespace CodexUsageOverlay
                 // sticky footer, but are not composer controls or obstructions.
                 if (selected == null || selected.NativeContainer == null || result.LeftAnchor.IsEmpty)
                 {
-                    result.State = ComposerProbeState.Unavailable; result.ToolbarHost = Rectangle.Empty; return result;
+                    result.State = MissingComposerState(editorFound, contextFound); result.ToolbarHost = Rectangle.Empty; return result;
                 }
-                foreach (AutomationElement node in nodes)
+                AutomationElementCollection composerNodes;
+                using (cache.Activate()) composerNodes = selected.NativeContainer.FindAll(TreeScope.Descendants, leaves);
+                foreach (AutomationElement node in composerNodes)
                 {
                     var data = node.Cached;
                     Rectangle rect = Bounds(data.BoundingRectangle);
@@ -494,9 +556,49 @@ namespace CodexUsageOverlay
                     if (IsNativeComposerDescendant(node, selected.NativeContainer)) occupied.Add(rect);
                 }
                 ComposerLayoutRecognition.Select(elements, occupied, window, scale, result);
+                DateTime completedUtc = DateTime.UtcNow;
+                if (completedUtc - captureStartedUtc <= TimeSpan.FromMilliseconds(1500))
+                    result.CapturedUtc = completedUtc;
                 return result;
             }
             catch { result.State = ComposerProbeState.Unavailable; result.ToolbarHost = Rectangle.Empty; return result; }
+            finally
+            {
+                // Compare the same native coordinate source on both sides of the
+                // scan. These bounds are not used as UIA/DWM layout coordinates.
+                CompleteCapture(result, nativeBefore, ReadNativeWindowBounds(handle));
+            }
+        }
+
+        internal static ComposerProbeState MissingComposerState(bool editorFound, bool contextFound)
+        {
+            // A partially readable composer is not proof that the user left the
+            // chat. UIA can mix button and parent coordinates during a drag.
+            return editorFound || contextFound ? ComposerProbeState.Unavailable : ComposerProbeState.NoComposer;
+        }
+
+        internal static void CompleteCapture(ComposerProbeSnapshot result, Rectangle nativeBefore, Rectangle nativeAfter)
+        {
+            if (nativeBefore.IsEmpty || nativeAfter.IsEmpty || nativeBefore != nativeAfter)
+            {
+                result.State = ComposerProbeState.Unavailable;
+                result.ToolbarHost = Rectangle.Empty;
+                result.LeftAnchor = Rectangle.Empty;
+                result.HostKind = null;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeWindowBounds { internal int Left, Top, Right, Bottom; }
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowRect")]
+        private static extern bool GetNativeWindowRect(IntPtr handle, out NativeWindowBounds bounds);
+
+        private static Rectangle ReadNativeWindowBounds(IntPtr handle)
+        {
+            NativeWindowBounds bounds;
+            return GetNativeWindowRect(handle, out bounds) && bounds.Right > bounds.Left && bounds.Bottom > bounds.Top
+                ? Rectangle.FromLTRB(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom) : Rectangle.Empty;
         }
 
         internal static bool IsFloatingControl(ControlType type)
@@ -538,12 +640,20 @@ namespace CodexUsageOverlay
                     container = box;
                     nativeContainer = parent;
                 }
-                if (className.IndexOf("_MainContentSurface_", StringComparison.Ordinal) >= 0 && !thread.IsEmpty)
+                if (IsMainContentSurfaceClass(className) && !thread.IsEmpty)
                     return Rectangle.Intersect(window, Rectangle.Intersect(thread, box));
             }
             // ChatGPT's embedded website has editors and attachment buttons too, but
             // has no Codex MainContentSurface + thread-scroll ancestor pair.
             return Rectangle.Empty;
+        }
+
+        internal static bool IsMainContentSurfaceClass(string className)
+        {
+            return !String.IsNullOrEmpty(className) &&
+                (className.IndexOf("_MainContentSurface_", StringComparison.Ordinal) >= 0 ||
+                 className.IndexOf("MainContentSurface-", StringComparison.Ordinal) >= 0 ||
+                 String.Equals(className, "MainContentSurface", StringComparison.Ordinal));
         }
 
         private static bool IsNativeComposerDescendant(AutomationElement node, AutomationElement container)
@@ -579,21 +689,25 @@ namespace CodexUsageOverlay
 
         internal static bool IsPermissionLabel(string value)
         {
-            foreach (string label in new[] { "更改权限", "Change permissions", "Change permission mode", "帮我批准", "Help me approve" })
+            if (String.IsNullOrEmpty(value)) return false;
+            if (value.StartsWith("更改权限", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("Change permissions", StringComparison.OrdinalIgnoreCase))
+                return true;
+            foreach (string label in new[] { "Change permission mode", "帮我批准", "Help me approve", "Approve for me" })
                 if (String.Equals(value, label, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
         }
 
         internal static bool IsSendLabel(string value)
         {
-            foreach (string label in new[] { "Send", "Send message", "Send prompt", "Stop", "Stop generating", "Stop response", "Stop turn", "发送", "发送消息", "发送提示", "停止", "停止生成", "停止运行" })
+            foreach (string label in new[] { "Send", "Send message", "Send prompt", "Stop", "Stop generating", "Stop response", "Stop turn", "Steer", "Queue", "Resume", "发送", "发送消息", "发送提示", "停止", "停止生成", "停止运行", "引导", "排队", "继续" })
                 if (String.Equals(value, label, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
         }
 
         internal static bool IsVoiceLabel(string value)
         {
-            foreach (string label in new[] { "开启语音聊天", "Start voice mode", "Start voice chat", "Open voice mode" })
+            foreach (string label in new[] { "开启语音聊天", "结束语音聊天", "Start voice mode", "Start voice chat", "Open voice mode", "End voice mode", "End voice chat" })
                 if (String.Equals(value, label, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
         }

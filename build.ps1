@@ -74,6 +74,9 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     (Join-Path $projectRoot 'PlacementSelectorForm.cs') `
     (Join-Path $projectRoot 'ExitConfirmationForm.cs') `
     (Join-Path $projectRoot 'UsageData.cs') `
+    (Join-Path $projectRoot 'ResetCreditData.cs') `
+    (Join-Path $projectRoot 'AutoResetCreditsService.cs') `
+    (Join-Path $projectRoot 'AutoResetCreditsForm.cs') `
     (Join-Path $projectRoot 'AccountTokenPolicy.cs') `
     (Join-Path $projectRoot 'SessionUsageReader.cs') `
     (Join-Path $projectRoot 'SessionUsageForm.cs') `

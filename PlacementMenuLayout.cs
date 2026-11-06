@@ -16,13 +16,14 @@ namespace CodexUsageOverlay
         ToggleTokens,
         ToggleResetCredits,
         TogglePlan,
-        SessionUsage
+        SessionUsage,
+        AutoResetCredits
     }
 
     internal static class PlacementMenuLayout
     {
         internal const int LogicalWidth = 344;
-        internal const int LogicalHeight = 288;
+        internal const int LogicalHeight = 256;
 
         internal static bool IsDisplayToggle(PlacementMenuAction action)
         {
@@ -33,6 +34,13 @@ namespace CodexUsageOverlay
         internal static bool IsThemeAction(PlacementMenuAction action)
         {
             return action >= PlacementMenuAction.ThemeAuto && action <= PlacementMenuAction.ThemeDark;
+        }
+
+        internal static bool IsToolAction(PlacementMenuAction action)
+        {
+            return action == PlacementMenuAction.SessionUsage ||
+                action == PlacementMenuAction.AutoResume ||
+                action == PlacementMenuAction.AutoResetCredits;
         }
 
         internal static Rectangle ChoiceBounds(OverlayPlacement placement)
@@ -51,15 +59,22 @@ namespace CodexUsageOverlay
         internal static Rectangle ActionBounds(PlacementMenuAction action)
         {
             if (action == PlacementMenuAction.CheckGitHubUpdate) return new Rectangle(LogicalWidth - 16 - 81, 8, 81, 30);
-            if (action == PlacementMenuAction.AutoResume) return new Rectangle(72, 252, 256, 30);
-            if (action == PlacementMenuAction.SessionUsage) return new Rectangle(72, 212, 256, 30);
+            if (IsToolAction(action))
+            {
+                int slot = action == PlacementMenuAction.SessionUsage ? 0 :
+                    action == PlacementMenuAction.AutoResume ? 1 : 2;
+                return new Rectangle(72 + slot * 87, 212, slot == 2 ? 82 : 81, 30);
+            }
             if (IsDisplayToggle(action))
             {
                 int slot = action == PlacementMenuAction.TogglePlan ? 0 : action == PlacementMenuAction.ToggleTokens ? 1 : 2;
                 return new Rectangle(72 + slot * 87, 172, slot == 2 ? 82 : 81, 30);
             }
             if (IsThemeAction(action))
-                return new Rectangle(72 + ((int)action - (int)PlacementMenuAction.ThemeAuto) * 87, 132, 81, 30);
+            {
+                int slot = (int)action - (int)PlacementMenuAction.ThemeAuto;
+                return new Rectangle(72 + slot * 87, 132, slot == 2 ? 82 : 81, 30);
+            }
             int index = (int)action;
             int width = index == 2 ? 82 : 81;
             return new Rectangle(72 + index * 87, 92, width, 30);
@@ -100,7 +115,8 @@ namespace CodexUsageOverlay
                 PlacementMenuAction.ToggleTokens,
                 PlacementMenuAction.ToggleResetCredits,
                 PlacementMenuAction.TogglePlan,
-                PlacementMenuAction.SessionUsage
+                PlacementMenuAction.SessionUsage,
+                PlacementMenuAction.AutoResetCredits
             })
             {
                 if (ActionBounds(action).Contains(location))

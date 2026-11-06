@@ -10,12 +10,14 @@ New-Item -ItemType Directory -Path $taskOutput -Force | Out-Null
 # Hidden process startup is not sufficient if an exporter explicitly shows a form.
 # All modes exit before creating the live usage/automatic-resume services.
 $taskExports = @(
+    @('pro','pro-pills-preview.png'),
     @('composer','composer-pills-preview.png'),
     @('hover-card','quota-hover-card-preview.png'),
     @('reset-credits','reset-credits-hover-preview.png'),
     @('placement','unified-plus-menu-preview.png'),
     @('codex-updater','codex-update-preview.png'),
     @('auto-resume','auto-resume-preview.png'),
+    @('auto-reset-credits','auto-reset-credits-preview.png'),
     @('session-usage','session-usage-preview.png')
 )
 $taskSideExport = Start-Process -FilePath $taskExe -ArgumentList ('--export-sidebar-previews="' + $taskOutput + '"') -WindowStyle Hidden -Wait -PassThru
